@@ -1,0 +1,26 @@
+# 基于 LLVM 风格（大括号附加、缩进等），再按需调整
+BasedOnStyle: LLVM
+# 适用于 语言
+Language: Cpp
+# ---------- 缩进与空格 ----------
+UseTab: Never               
+IndentWidth: 4              # 4个空格缩进
+TabWidth: 4                 # 如果文件中残留 Tab，显示宽度为4
+ColumnLimit: 120            # 每行最多120字符
+BreakBeforeBraces: Attach   # K&R 风格：左大括号不换行
+PointerAlignment: Right     # int *ptr; 星号靠右
+IndentCaseLabels: false     # switch 的 case 不额外缩进（与 LLVM 一致）
+
+# 控制流：永远不用单行 if/for/while（即使只有一句也强制换行加花括号）
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+
+# 函数参数换行时，在开括号后对齐（更整齐）
+AlignAfterOpenBracket: Align
+# 运算符换行时放在行尾（而不是下一行开头）
+BreakBeforeBinaryOperators: None
+
+# 预处理指令不缩进
+IndentPPDirectives: None
+# 禁止空函数写在一行（如 void f() {}）
+AllowShortFunctionsOnASingleLine: None

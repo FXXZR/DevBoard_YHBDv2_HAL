@@ -1,0 +1,26 @@
+CompileFlags:
+  # 告诉 clangd 去哪里找 compile_commands.json
+  CompilationDatabase: build/Debug
+
+  # 强制指定目标架构为 ARM 裸机，否则 clangd 会用 x86_64 Windows 来解析
+  # 导致 CMSIS 头文件报 "Unknown compiler"
+  Add: [-target, arm-none-eabi, -mcpu=cortex-m3, -DSTM32F103xE, -DUSE_HAL_DRIVER, -DDEBUG, -D__NVIC_PRIO_BITS=4U, -D__MPU_PRESENT=0, -D__Vendor_SysTickConfig=0]
+
+  # 去掉 ARM GCC 特有但 clangd 不认识或有问题的 flag
+  # 注意: -mcpu=* 不再移除——因为 -target arm-none-eabi 已告知 clangd 目标为 ARM，
+  # clangd 能够识别 -mcpu=cortex-m3，从而正确定义 __ARM_ARCH_7M__、__CORTEX_M3 等宏，
+  # 避免 CMSIS/HAL 头文件因找不到正确的 CPU 架构宏定义而报 unknown type name 错误。
+  Remove:
+    - -fdata-sections
+    - -ffunction-sections
+    - -fstack-usage
+    - -MD
+    - -MP
+    - -MMD
+    - -specs=*
+
+Diagnostics:
+  # unused-includes: 抑制 "Included header X is not used directly" 的误报。
+  # STM32 HAL 库中很多头文件是为了其副作用（类型/宏定义）而被包含的，
+  # clangd 无法检测到这些间接使用，导致误报黄色波浪线。
+  Suppress: [unknown_warning_option, unused_parameter, unused-includes]

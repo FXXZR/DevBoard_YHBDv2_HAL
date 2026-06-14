@@ -1,0 +1,16 @@
+# Build output
+build/
+
+# Firmware binaries (generated from ELF via objcopy)
+*.hex
+*.bin
+
+# Editor / IDE config (personal settings)
+.vscode/
+.claude/
+.idea/
+
+# OS junk files
+.DS_Store
+Thumbs.db
+*~
