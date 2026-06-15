@@ -10,6 +10,9 @@ build/
 .claude/
 .idea/
 
+# Reference/temp files (not part of firmware)
+Document/temp/
+
 # OS junk files
 .DS_Store
 Thumbs.db
