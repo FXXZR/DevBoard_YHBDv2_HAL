@@ -52,6 +52,10 @@ set(STM32_Drivers_Src
 
     # ---- UART (启用 HAL_UART_MODULE_ENABLED 后取消注释) ----
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_uart.c
+
+    # ---- RTC (启用 HAL_RTC_MODULE_ENABLED 后取消注释) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc_ex.c
 )
 
 # 注意: 以下 HAL 模块源文件按需启用。
@@ -92,9 +96,7 @@ set(STM32_Drivers_Src
 # ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim.c
 # ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_tim_ex.c
 
-# ---- RTC (启用 HAL_RTC_MODULE_ENABLED 后取消注释) ----
-# ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc.c
-# ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc_ex.c
+# RTC 已在上方 set(STM32_Drivers_Src ...) 中启用
 
 # ---- IWDG (启用 HAL_IWDG_MODULE_ENABLED 后取消注释) ----
 # ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_iwdg.c

@@ -19,6 +19,10 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_systick.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_usart.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_beep.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_adc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_rtc.c
     # 后续新增 BSP 驱动在这里添加，例如：
     # ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
 )

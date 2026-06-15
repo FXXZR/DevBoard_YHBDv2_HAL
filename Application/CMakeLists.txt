@@ -16,9 +16,13 @@
 
 add_library(app OBJECT)
 
-# ---- 入口文件 ----
+# ---- 入口文件 + 测试模块 ----
 target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/main.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_beep_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_key.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_adc.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_rtc.c
 
     # 后续新增应用模块在这里添加，例如:
     # ${CMAKE_CURRENT_SOURCE_DIR}/Common/app_data_model.c
@@ -31,6 +35,7 @@ target_include_directories(app PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}            # 根: main.c 所在
     ${CMAKE_CURRENT_SOURCE_DIR}/Config     # HAL 配置
     ${CMAKE_CURRENT_SOURCE_DIR}/Common     # 公共头文件
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test       # 测试模块头文件
     # 后续:
     # ${CMAKE_CURRENT_SOURCE_DIR}/Modules
     # ${CMAKE_CURRENT_SOURCE_DIR}/DataManager

@@ -23,41 +23,42 @@
 #include "bsp_systick.h"
 #include "bsp_led.h"
 #include "bsp_usart.h"
+#include "test.h"
 
 
 /* Private function prototypes -----------------------------------------------*/
 void Error_Handler(void);
-/* USER CODE BEGIN PFP */
 
-/* USER CODE END PFP */
-
-/* Private user code ---------------------------------------------------------*/
-/* USER CODE BEGIN 0 */
-
-/* USER CODE END 0 */
-
-/**
- * @brief  The application entry point.
- * @retval int
- */
+/* ================================================================
+ * 主函数
+ * ================================================================ */
 int main(void) {
 
+    /* ---- 硬件抽象层 + 系统时钟 ---- */
     HAL_Init();
     BSP_SYSTICK_DelayInit();
 
+    /* ---- BSP 外设驱动初始化 ---- */
     BSP_LED_Init();
-    BSP_USART_Init(BSP_USART1, 115200);  /* USART1: 8-N-1，给 printf 用 */
+    BSP_USART_Init(BSP_USART1, 115200);
 
-    /* Print startup banner via USART1 (printf redirected) */
+    /* ---- 启动 Banner ---- */
     printf("\r\n========================================\r\n");
     printf("  HAL_TEST_Board — STM32F103ZET6\r\n");
-    printf("  USART Driver Initialized (5ch, 115200)\r\n");
+    printf("  BSP: LED | USART | BEEP | KEY | ADC | RTC\r\n");
     printf("========================================\r\n\r\n");
 
-    uint8_t ch;
-    /* Infinite loop */
+    /* ================================================================
+     * 测试入口：取消注释要运行的测试，其他保持注释
+     * ================================================================ */
+    // Test_BEEP_KeyTrigger();   /* KEY1 按下 → 蜂鸣 200ms */
+    // Test_KEY_Scan();          /* KEY1/2 → LED + printf 状态 */
+    // Test_ADC_Continuous();    /* PC1 电压每 500ms printf */
+    Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
+
+    /* ---- 不会执行到这里 (测试函数内部有死循环) ---- */
     while (1) {
-        /* LED 交替闪烁 */
+        /* 回退: LED 交替闪烁 + USART1 回显 */
         if(HAL_GetTick() % 1000 < 500) {
             BSP_LED_On(BSP_LED_R);
             BSP_LED_Off(BSP_LED_G);
@@ -68,8 +69,7 @@ int main(void) {
             BSP_LED_On(BSP_LED_B);
         }
 
-        /* USART1 回显：收到什么就发回什么 */
-        
+        uint8_t ch;
         if(BSP_USART_Read(BSP_USART1, &ch) == 0) {
             BSP_USART_Send(BSP_USART1, &ch, 1);
             BSP_USART_Flush(BSP_USART1, 10);
@@ -84,13 +84,11 @@ int main(void) {
  * @retval None
  */
 void Error_Handler(void) {
-    /* USER CODE BEGIN Error_Handler_Debug */
-    /* User can add his own implementation to report the HAL error return state */
     __disable_irq();
     while (1) {
     }
-    /* USER CODE END Error_Handler_Debug */
 }
+
 #ifdef USE_FULL_ASSERT
 /**
  * @brief  Reports the name of the source file and the source line number
@@ -100,10 +98,8 @@ void Error_Handler(void) {
  * @retval None
  */
 void assert_failed(uint8_t *file, uint32_t line) {
-    /* USER CODE BEGIN 6 */
     /* User can add his own implementation to report the file name and line
        number, ex: printf("Wrong parameters value: file %s on line %d\r\n", file,
        line) */
-    /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
