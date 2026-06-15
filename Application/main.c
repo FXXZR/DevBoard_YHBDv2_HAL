@@ -18,23 +18,22 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include <stdint.h>
+#include <stdio.h>
 #include "stm32f1xx_hal.h"
+#include "bsp_systick.h"
 #include "bsp_led.h"
+#include "bsp_usart.h"
 
 
 /* Private function prototypes -----------------------------------------------*/
 void Error_Handler(void);
-void SystemClock_Config(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void delay_volatile(uint32_t count) {
-    for (volatile uint32_t i = 0; i < count; i++)
-        ;
-}
+
 /* USER CODE END 0 */
 
 /**
@@ -43,95 +42,42 @@ static void delay_volatile(uint32_t count) {
  */
 int main(void) {
 
-    /* USER CODE BEGIN 1 */
-
-    /* USER CODE END 1 */
-
-    /* MCU Configuration--------------------------------------------------------*/
-
-    /* Reset of all peripherals, Initializes the Flash interface and the Systick.
-     */
     HAL_Init();
+    BSP_SYSTICK_DelayInit();
 
-    /* USER CODE BEGIN Init */
-
-    /* USER CODE END Init */
-
-    /* Configure the system clock */
-    SystemClock_Config();
-
-    /* USER CODE BEGIN SysInit */
-
-    /* USER CODE END SysInit */
-
-    /* Initialize all configured peripherals */
     BSP_LED_Init();
-    /* USER CODE BEGIN 2 */
-    /* USER CODE END 2 */
+    BSP_USART_Init(BSP_USART1, 115200);  /* USART1: 8-N-1，给 printf 用 */
 
+    /* Print startup banner via USART1 (printf redirected) */
+    printf("\r\n========================================\r\n");
+    printf("  HAL_TEST_Board — STM32F103ZET6\r\n");
+    printf("  USART Driver Initialized (5ch, 115200)\r\n");
+    printf("========================================\r\n\r\n");
+
+    uint8_t ch;
     /* Infinite loop */
-    /* USER CODE BEGIN WHILE */
     while (1) {
-        // R 亮
-        BSP_LED_On(BSP_LED_R);
-        delay_volatile(3000000);
-        BSP_LED_Off(BSP_LED_R);
-        delay_volatile(3000000);
+        /* LED 交替闪烁 */
+        if(HAL_GetTick() % 1000 < 500) {
+            BSP_LED_On(BSP_LED_R);
+            BSP_LED_Off(BSP_LED_G);
+            BSP_LED_Off(BSP_LED_B);
+        } else {
+            BSP_LED_Off(BSP_LED_R);
+            BSP_LED_On(BSP_LED_G);
+            BSP_LED_On(BSP_LED_B);
+        }
 
-        // G 亮
-        BSP_LED_On(BSP_LED_G);
-        delay_volatile(3000000);
-        BSP_LED_Off(BSP_LED_G);
-        delay_volatile(3000000);
-        // B 亮
+        /* USART1 回显：收到什么就发回什么 */
         
-        BSP_LED_On(BSP_LED_B);
-        delay_volatile(3000000);
-        BSP_LED_Off(BSP_LED_B);
-        delay_volatile(3000000);
-    }
-    /* USER CODE END 3 */
-}
-
-/**
- * @brief System Clock Configuration
- * @retval None
- */
-void SystemClock_Config(void) {
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
-
-    /** Initializes the RCC Oscillators according to the specified parameters
-     * in the RCC_OscInitTypeDef structure.
-     */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-    RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-    RCC_OscInitStruct.HSEPredivValue = RCC_HSE_PREDIV_DIV1;
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-    RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL9;
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) {
-        Error_Handler();
-    }
-
-    /** Initializes the CPU, AHB and APB buses clocks
-     */
-    RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
-    RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
-    RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
-    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
-    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
-
-    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK) {
-        Error_Handler();
+        if(BSP_USART_Read(BSP_USART1, &ch) == 0) {
+            BSP_USART_Send(BSP_USART1, &ch, 1);
+            BSP_USART_Flush(BSP_USART1, 10);
+        }
     }
 }
 
 
-/* USER CODE BEGIN 4 */
-
-/* USER CODE END 4 */
 
 /**
  * @brief  This function is executed in case of error occurrence.

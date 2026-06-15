@@ -31,14 +31,14 @@ pyocd flash --target stm32f103ze --connect under-reset \
   -O reset_type=hw build/Debug/HAL_TEST_Board.elf
 ```
 
-Claude Code shortcuts: `/build-stm32` (build), `/flash-stm32` (flash).
+Claude Code shortcuts: `/build-stm32` (build), `/flash-stm32` (flash), `/reset-stm32` (reset), `/serial-debug` (serial).
 
 ## Architecture
 
 ```
 Application/          ← business logic, main.c, no direct HAL access
     ↓ depends on
-BSP/                  ← board abstraction (bsp_led); ONLY layer that includes HAL
+BSP/                  ← board abstraction (bsp_systick, bsp_led, bsp_usart); ONLY layer that includes HAL
     ↓ depends on
 Drivers/STM32F1xx_HAL_Driver/  ← ST HAL (11 modules compiled)
 Drivers/CMSIS/                  ← ARM CMSIS + device headers
@@ -53,7 +53,9 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (INTERFACE + OBJECT libs)
 
 | File | Role |
 |---|---|
-| `Application/main.c` | `main()`, `SystemClock_Config()`, LED blink loop |
+| `Application/main.c` | `main()`, LED blink + USART echo loop |
+| `BSP/Inc/bsp_systick.h` | SysTick API: `BSP_SYSTICK_DelayInit/DelayUS/DelayMS()` — SysTick + HAL tick |
+| `BSP/Src/bsp_systick.c` | Clock config (HSE→PLL→72MHz) + us (SysTick VAL) / ms (HAL_GetTick) delays |
 | `BSP/Inc/bsp_led.h` | LED API: `BSP_LED_Init/On/Off/Toggle(BSP_LED_Id_t id)` |
 | `BSP/Src/bsp_led.c` | LED GPIO impl, pin map table |
 | `Start/startup_stm32f103xe.s` | Vector table, Reset_Handler |
@@ -67,9 +69,9 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (INTERFACE + OBJECT libs)
 
 | Pin | Function | Label |
 |-----|----------|-------|
-| PB0 | GPIO Output (active-low) | Red LED |
-| PB1 | GPIO Output (active-low) | Green LED |
-| PB5 | GPIO Output (active-low) | Blue LED |
+| PB0 | GPIO Output (active-low) | Green LED |
+| PB1 | GPIO Output (active-low) | Blue LED |
+| PB5 | GPIO Output (active-low) | Red LED |
 
 All LED pins: push-pull, no pull-up/down, high speed. GPIOA clock also enabled in `HAL_MspInit()`.
 
@@ -132,4 +134,19 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 ## Current Firmware Behavior
 
-Red (PB0) and Blue (PB5) LEDs alternate blink via busy-wait delay loop in `main()`. Green (PB1) LED code present but commented out.
+Red (PB5) LED blinks at 1Hz via `BSP_Delay_MS(500)`. Green (PB0) and Blue (PB1) LED code present but commented out. USART1 echo in main loop.
+
+**Delay architecture**: `BSP_SYSTICK_DelayUS` uses SysTick->VAL (Cortex-M 24-bit down-counter polling, works with HAL's 1ms auto-reload). `BSP_SYSTICK_DelayMS` uses `HAL_GetTick()` polling (SysTick 1ms ISR still services HAL tick). Neither conflicts with RTOS.
+
+## Debug
+
+VS Code F5 debugging via **Cortex-Debug** + **PyOCD** (`.vscode/launch.json`):
+
+| Config | Description |
+|--------|-------------|
+| **Flash & Debug** | `F5` → builds → flashes → halts at `main()` |
+| **Attach (running)** | Attach to running firmware without re-flash |
+
+Requires VS Code extension `marus25.cortex-debug`.
+
+For automated debugging, prefer **serial printf logging** (`/serial-debug`) — it is simpler and more reliable than CLI GDB for AI-assisted workflows.

@@ -19,9 +19,9 @@ typedef struct {
 } LED_HW_Map_t;
 
 static const LED_HW_Map_t led_hw_map[BSP_LED_COUNT] = {
-    [BSP_LED_R] = { .port = GPIOB, .pin = GPIO_PIN_1 },
-    [BSP_LED_G] = { .port = GPIOB, .pin = GPIO_PIN_5 },
-    [BSP_LED_B] = { .port = GPIOB, .pin = GPIO_PIN_0 },
+    [BSP_LED_R] = { .port = GPIOB, .pin = GPIO_PIN_5 },
+    [BSP_LED_G] = { .port = GPIOB, .pin = GPIO_PIN_0 },
+    [BSP_LED_B] = { .port = GPIOB, .pin = GPIO_PIN_1 },
 };
 
 /* ================================================================
