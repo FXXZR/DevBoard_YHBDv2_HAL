@@ -160,13 +160,23 @@ static void rtc_cold_init(void)
     osc.OscillatorType = RCC_OSCILLATORTYPE_LSE;
     osc.LSEState       = RCC_LSE_ON;
     osc.PLL.PLLState   = RCC_PLL_NONE;
-    HAL_RCC_OscConfig(&osc);
-
-    RCC_PeriphCLKInitTypeDef pclk = {0};
-    pclk.PeriphClockSelection = RCC_PERIPHCLK_RTC;
-    pclk.RTCClockSelection    = RCC_RTCCLKSOURCE_LSE;
-    HAL_RCCEx_PeriphCLKConfig(&pclk);
-    __HAL_RCC_LSE_CONFIG(RCC_LSE_ON);
+    if (HAL_RCC_OscConfig(&osc) != HAL_OK) {
+        /* LSE 启动失败 (超时或未焊接晶振), 回退到 LSI */
+        osc.OscillatorType = RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_LSE;
+        osc.LSIState       = RCC_LSI_ON;
+        osc.LSEState       = RCC_LSE_OFF;
+        HAL_RCC_OscConfig(&osc);
+        RCC_PeriphCLKInitTypeDef pclk = {0};
+        pclk.PeriphClockSelection = RCC_PERIPHCLK_RTC;
+        pclk.RTCClockSelection    = RCC_RTCCLKSOURCE_LSI;
+        HAL_RCCEx_PeriphCLKConfig(&pclk);
+    } else {
+        RCC_PeriphCLKInitTypeDef pclk = {0};
+        pclk.PeriphClockSelection = RCC_PERIPHCLK_RTC;
+        pclk.RTCClockSelection    = RCC_RTCCLKSOURCE_LSE;
+        HAL_RCCEx_PeriphCLKConfig(&pclk);
+        __HAL_RCC_LSE_CONFIG(RCC_LSE_ON);
+    }
 #elif defined(BSP_RTC_CLK_LSI)
     osc.OscillatorType = RCC_OSCILLATORTYPE_LSI | RCC_OSCILLATORTYPE_LSE;
     osc.LSIState       = RCC_LSI_ON;
@@ -221,11 +231,12 @@ void BSP_RTC_Init(void)
     __HAL_RCC_BKP_CLK_ENABLE();
     HAL_PWR_EnableBkUpAccess();
 
-    if (HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MAGIC) != RTC_MAGIC_VALUE) {
-        /* 冷启动: VBAT 掉电过 */
+    uint32_t magic = HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MAGIC);
+    if (magic != RTC_MAGIC_VALUE) {
+        /* 冷启动: VBAT 掉电过, 完整配置 LSE + RTC */
         rtc_cold_init();
     } else {
-        /* 热启动: RTC 一直在跑 */
+        /* 热启动: RTC 一直在跑, 仅重建 APB 接口 + 恢复日期 */
         rtc_handle.Instance = RTC;
         __HAL_RCC_RTC_ENABLE();
         HAL_RTC_WaitForSynchro(&rtc_handle);

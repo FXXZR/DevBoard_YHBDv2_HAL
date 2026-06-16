@@ -23,8 +23,11 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_key.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_adc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_rtc.c
-    # 后续新增 BSP 驱动在这里添加，例如：
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_i2c.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_soft_i2c.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_eeprom.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi_flash.c
 )
 
 # BSP 对外暴露的头文件路径（应用层需要 #include "bsp_xxx.h"）

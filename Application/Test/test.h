@@ -22,6 +22,8 @@
 #include "bsp_key.h"
 #include "bsp_adc.h"
 #include "bsp_rtc.h"
+#include "bsp_eeprom.h"
+#include "bsp_spi_flash.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -58,6 +60,22 @@ void Test_ADC_Continuous(void);
  *         串口命令: time / date / interval / help
  */
 void Test_RTC_Interactive(void);
+
+/**
+ * @brief  EEPROM 读写测试（AT24C02 全片写入 + 读出校验）
+ * @note   通过 I2C (默认软件 I2C) 操作 AT24C02。
+ *         测试流程：全片擦除 → 写入测试模式 → 读回校验 → 打印结果。
+ *         若校验失败会打印错误地址和期望/实际值。
+ */
+void Test_EEPROM_ReadWrite(void);
+
+/**
+ * @brief  SPI Flash 读写测试（W25Q64 ID + 扇区擦写 + 校验）
+ * @note   通过 SPI1 操作 W25Q64。
+ *         测试流程：读取 JEDEC ID → 扇区擦除 → 写入测试数据 → 读回校验。
+ *         若 ID 不匹配会打印错误并跳过后续测试。
+ */
+void Test_SPI_FLASH_ReadWrite(void);
 
 #ifdef __cplusplus
 }

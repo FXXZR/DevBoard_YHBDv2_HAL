@@ -226,10 +226,10 @@ void Test_RTC_Interactive(void)
             last_tick = now;
             BSP_RTC_DateTime_t dt;
             BSP_RTC_GetDateTime(&dt);
+            uint32_t ts = BSP_RTC_dt_to_ts(&dt);  /* 纯算法, 不重复读 RTC */
             printf("[RTC] 20%02d-%02d-%02d %02d:%02d:%02d  ts=%lu\r\n",
                    dt.year, dt.month, dt.date,
-                   dt.hour, dt.min, dt.sec,
-                   (unsigned long)BSP_RTC_GetTimestamp());
+                   dt.hour, dt.min, dt.sec, (unsigned long)ts);
         }
 
         /* 串口命令 */

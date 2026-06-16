@@ -56,6 +56,12 @@ set(STM32_Drivers_Src
     # ---- RTC (启用 HAL_RTC_MODULE_ENABLED 后取消注释) ----
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc.c
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_rtc_ex.c
+
+    # ---- SPI (启用 HAL_SPI_MODULE_ENABLED 后取消注释) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_spi.c
+
+    # ---- I2C (启用 HAL_I2C_MODULE_ENABLED 后取消注释) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_i2c.c
 )
 
 # 注意: 以下 HAL 模块源文件按需启用。
@@ -63,12 +69,6 @@ set(STM32_Drivers_Src
 
 # ---- USART (启用 HAL_USART_MODULE_ENABLED 后取消注释) ----
 # ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_usart.c
-
-# ---- SPI (启用 HAL_SPI_MODULE_ENABLED 后取消注释) ----
-# ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_spi.c
-
-# ---- I2C (启用 HAL_I2C_MODULE_ENABLED 后取消注释) ----
-# ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_i2c.c
 
 # ---- I2S (启用 HAL_I2S_MODULE_ENABLED 后取消注释) ----
 # ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_i2s.c

@@ -54,7 +54,9 @@ int main(void) {
     // Test_BEEP_KeyTrigger();   /* KEY1 按下 → 蜂鸣 200ms */
     // Test_KEY_Scan();          /* KEY1/2 → LED + printf 状态 */
     // Test_ADC_Continuous();    /* PC1 电压每 500ms printf */
-    Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
+    // Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
+    Test_EEPROM_ReadWrite();   /* AT24C02 全片写入 + 读出校验 */
+    Test_SPI_FLASH_ReadWrite(); /* W25Q64 全片写入 + 读出校验 */
 
     /* ---- 不会执行到这里 (测试函数内部有死循环) ---- */
     while (1) {

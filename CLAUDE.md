@@ -10,7 +10,7 @@
 - **Build system**: CMake 3.22+ + Ninja
 - **C standard**: C11 (gnu11 extensions)
 - **Output**: `build/Debug/HAL_TEST_Board.elf`
-- **Current firmware size**: ~26KB FLASH, ~5KB RAM (Debug -O0)
+- **Current firmware size**: ~26KB FLASH, ~5KB RAM (Debug -O0, with SPI+I2C HAL)
 
 ## Quick Build
 
@@ -61,6 +61,8 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | `Application/Test/test_key.c` | KEY 扫描: KEY1→LED_R, KEY2→LED_G, printf 状态 |
 | `Application/Test/test_adc.c` | ADC 采样: PC1 电压每 500ms printf mV |
 | `Application/Test/test_rtc.c` | RTC 交互: 定时打印 + 串口命令 T/D/S/U/I/H |
+| `Application/Test/test_eeprom.c` | EEPROM 读写验证: AT24C02 全片擦除→写入模式→读回校验 |
+| `Application/Test/test_spi_flash.c` | SPI Flash 读写验证: W25Q64 ID→扇区擦→写→读→校验 |
 | `BSP/Inc/bsp_systick.h` | SysTick: `BSP_SYSTICK_DelayInit/DelayUS/DelayMS()` |
 | `BSP/Src/bsp_systick.c` | 时钟配置 (HSE→PLL→72MHz) + us/ms 阻塞延时 |
 | `BSP/Inc/bsp_led.h` | LED: `BSP_LED_Init/On/Off/Toggle(BSP_LED_Id_t id)` |
@@ -71,6 +73,16 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | `BSP/Inc/bsp_adc.h` | ADC: `BSP_ADC_Init/Read_mV()` — ADC1 CH11, DMA 循环 |
 | `BSP/Inc/bsp_rtc.h` | RTC: `DateTime/GetTimestamp/SetTimestamp` + ts↔dt 互转 |
 | `BSP/Src/bsp_rtc.c` | RTC 实现: LSE/LSI 时钟源, Backup 寄存器日期持久化, 冷/热启动 |
+| `BSP/Inc/bsp_i2c.h` | HW I2C: `BSP_I2C_Init/MemWrite/MemRead/IsDeviceReady` — I2C1 PB6/PB7 |
+| `BSP/Src/bsp_i2c.c` | HW I2C 实现: HAL I2C 阻塞式主机, APB1=36MHz, 默认 100KHz |
+| `BSP/Inc/bsp_soft_i2c.h` | SW I2C: `BSP_SoftI2C_Init/MemWrite/MemRead/IsDeviceReady` |
+| `BSP/Src/bsp_soft_i2c.c` | SW I2C 实现: GPIO 位带 + `BSP_SYSTICK_DelayUS` 延时, 100K/400K/1M |
+| `BSP/Inc/bsp_eeprom.h` | EEPROM: AT24C02, `BSP_EEPROM_USE_SOFT_I2C` 宏选择 I2C 后端 |
+| `BSP/Src/bsp_eeprom.c` | EEPROM 实现: 默认软 I2C, 自动页边界拆分, 写周期等待 |
+| `BSP/Inc/bsp_spi.h` | SPI: `BSP_SPI_Init/Transfer/TransferBuffer` — SPI1 PA5/PA6/PA7 |
+| `BSP/Src/bsp_spi.c` | SPI 实现: HAL SPI 主机模式 18MHz, NSS 软件管理 |
+| `BSP/Inc/bsp_spi_flash.h` | SPI Flash: W25Q64 指令集, JEDEC ID=0xEF4017, 8MB 容量 |
+| `BSP/Src/bsp_spi_flash.c` | SPI Flash 实现: CS=PA4, 页写/扇区擦/块擦/全片擦, 轮询 BUSY |
 | `Start/startup_stm32f103xe.s` | Vector table, Reset_Handler |
 | `Start/STM32F103XX_FLASH.ld` | Linker script — memory regions + sections |
 | `Start/stm32f1xx_hal_conf.h` | HAL module enable/disable switches |
@@ -83,6 +95,10 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 
 | Pin | Function | Label |
 |-----|----------|-------|
+| PA4 | GPIO Output (active-high) | SPI Flash CS (W25Q64) |
+| PA5 | AF PP (SPI1_SCK) | SPI Flash SCK |
+| PA6 | AF PP (SPI1_MISO) | SPI Flash MISO |
+| PA7 | AF PP (SPI1_MOSI) | SPI Flash MOSI |
 | PB5 | GPIO Output (active-low) | Red LED |
 | PB0 | GPIO Output (active-low) | Green LED |
 | PB1 | GPIO Output (active-low) | Blue LED |
@@ -90,6 +106,8 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | PA0 | GPIO Input (no pull) | KEY1 |
 | PC13 | GPIO Input (no pull) | KEY2 |
 | PC1 | ADC1_IN11 | ADC input (potentiometer) |
+| PB6 | AF4 OD (I2C1_SCL) | I2C SCL (EEPROM AT24C02) |
+| PB7 | AF4 OD (I2C1_SDA) | I2C SDA (EEPROM AT24C02) |
 | — | LSE 32.768KHz | RTC 时钟源 (外部晶振) |
 | PA9/PA10 | USART1 TX/RX | printf / serial debug |
 | PA2/PA3 | USART2 TX/RX | (reserved) |
@@ -128,6 +146,8 @@ Flash latency = 2WS. SysTick = 1ms via `HAL_IncTick()`.
 | UART | `HAL_UART_MODULE_ENABLED` | `hal_uart.c` |
 | ADC | `HAL_ADC_MODULE_ENABLED` | `hal_adc.c` + `hal_adc_ex.c` |
 | RTC | `HAL_RTC_MODULE_ENABLED` | `hal_rtc.c` + `hal_rtc_ex.c` |
+| SPI | `HAL_SPI_MODULE_ENABLED` | `hal_spi.c` |
+| I2C | `HAL_I2C_MODULE_ENABLED` | `hal_i2c.c` |
 
 **启用新模块的两步操作**:
 1. `Start/stm32f1xx_hal_conf.h` → 取消注释/添加 `#define HAL_xxx_MODULE_ENABLED`
@@ -179,6 +199,46 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 - **New test modules**: Add `.c` to `Application/Test/`, declare in `test.h`, add source to `Application/CMakeLists.txt`
 - **HAL config**: Two-step enable: `hal_conf.h` macro + `cmake/stm32cubemx/CMakeLists.txt` source uncomment
 - **BSP structs**: Prefer **designated initializers** over positional — HAL struct field orders are non-obvious (e.g. `RTC_DateTypeDef` is `{WeekDay, Month, Date, Year}` not `{Year, Month, Date}`)
+- **Git commits**: 格式 `@ type: 简述 — 补充说明`。`@` 前缀模拟作者标记，与 VS Code Git 图形面板的提交者列形成视觉对齐。叙述用中文，模块/函数/API 名保留原文。type 使用 conventional commits 分类 (`feat`/`fix`/`chore`/`refactor`/`docs`)。示例: `@ feat: BSP驱动扩充 — BEEP/KEY/ADC/RTC + Test测试模块`
+
+### 宏使用规范 (Macro Usage Rules)
+
+**严格遵守 C11 现代实践，减少预处理器滥用：**
+
+| 场景 | 允许/禁止 | 替代方案 |
+|------|-----------|----------|
+| 条件编译 (`#if`/`#ifdef`) / 功能开关 | ✅ 允许 | — |
+| 头文件保护 (`#ifndef` guard) | ✅ 允许 | — |
+| 错误码 / 状态码 | ❌ 禁止 `#define` | `typedef enum` |
+| 可选项 / 配置常量 (暴露给应用层) | ❌ 禁止 `#define` | `typedef enum` 或头文件中 `enum` 匿名枚举 |
+| 模块内部常量 (不对外暴露) | ❌ 禁止 `#define` | `.c` 文件中 `static const` |
+| 寄存器位操作 / 硬件地址 | ✅ 允许 (HAL/Start 层) | — |
+| 函数别名 / API 适配宏 | ⚠️ 最小化 | 优先用 `static inline` 函数 |
+
+**示例：**
+```c
+// ❌ 禁止
+#define BSP_I2C_OK      0U
+#define BSP_I2C_ERROR   1U
+#define BSP_EEPROM_PAGE_SIZE  8U
+
+// ✅ 正确
+typedef enum { BSP_I2C_OK = 0, BSP_I2C_ERROR, BSP_I2C_TIMEOUT } BSP_I2C_Status_t;
+// 页大小等常量如仅在 .c 使用 → static const uint8_t kPageSize = 8;
+// 如头文件需要暴露 → 匿名 enum { BSP_EEPROM_PAGE_SIZE = 8U };
+```
+
+### API 设计规范 (API Design Rules)
+
+**对于同类型多数量的外设，遵循 `bsp_usart` 模式，禁止 `void*` 句柄和 `extern` 全局总线实例：**
+
+| 规范 | 说明 |
+|------|------|
+| **枚举 ID 代替指针句柄** | `typedef enum { BSP_SPI_BUS_1, BSP_SPI_BUS_COUNT } BSP_SPI_Bus_Id_t;` |
+| **`static const` 硬件映射表** | `.c` 文件内部 `static const HW_Map_t hw_map[] = { [BUS_1] = {...} };` |
+| **`static` 上下文数组** | `.c` 文件内部 `static Ctx_t ctx[BSP_BUS_COUNT];`，外部不可见 |
+| **API 传枚举 ID** | `void BSP_SPI_Init(BSP_SPI_Bus_Id_t id);` 而非 `void BSP_SPI_Init(BSP_SPI_Bus_t *bus);` |
+| **禁止 `extern` 全局句柄** | 不暴露 `extern BSP_SPI_Bus_t g_spi_bus_1;` |
 
 ## Current Firmware Behavior
 
@@ -190,6 +250,8 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | `Test_KEY_Scan()` | KEY1→LED_R, KEY2→LED_G, printf state changes |
 | `Test_ADC_Continuous()` | PC1 voltage every 500ms via printf |
 | `Test_RTC_Interactive()` | RTC timestamp output + serial commands (T/D/S/U/I/H) |
+| `Test_EEPROM_ReadWrite()` | AT24C02 full erase → write pattern → read verify via I2C |
+| `Test_SPI_FLASH_ReadWrite()` | W25Q64 JEDEC ID → sector erase → write → verify via SPI |
 
 Default: `Test_RTC_Interactive()`. Switch by commenting/uncommenting the test function call in `main()`.
 
