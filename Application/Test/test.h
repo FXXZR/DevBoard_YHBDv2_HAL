@@ -24,6 +24,7 @@
 #include "bsp_rtc.h"
 #include "bsp_eeprom.h"
 #include "bsp_spi_flash.h"
+#include "bsp_sdcard.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -76,6 +77,15 @@ void Test_EEPROM_ReadWrite(void);
  *         若 ID 不匹配会打印错误并跳过后续测试。
  */
 void Test_SPI_FLASH_ReadWrite(void);
+
+/**
+ * @brief  SD Card + FatFS 读写验证测试
+ * @note   测试流程: SD 卡初始化 → 挂载 FatFS → 创建 test.txt →
+ *         读回校验 → 打印 PASS/FAIL
+ *         需要插入 FAT32 格式化的 SD 卡。
+ *         不自动格式化，保护已有数据。
+ */
+void Test_SDCARD_FatFS(void);
 
 #ifdef __cplusplus
 }

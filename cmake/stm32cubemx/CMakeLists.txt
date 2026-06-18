@@ -62,6 +62,12 @@ set(STM32_Drivers_Src
 
     # ---- I2C (启用 HAL_I2C_MODULE_ENABLED 后取消注释) ----
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_i2c.c
+
+    # ---- SD (启用 HAL_SD_MODULE_ENABLED 后取消注释) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_sd.c
+
+    # ---- LL SDMMC (配合 SD 模块使用) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_ll_sdmmc.c
 )
 
 # 注意: 以下 HAL 模块源文件按需启用。

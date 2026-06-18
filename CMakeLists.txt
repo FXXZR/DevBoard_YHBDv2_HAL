@@ -52,6 +52,11 @@ add_subdirectory(Start)
 add_subdirectory(BSP)
 
 # ================================================================
+# Middleware — 中间件 (ThirdParty 只读 + Port 移植胶水)
+# ================================================================
+add_subdirectory(Middleware)
+
+# ================================================================
 # Application — 应用层（业务逻辑）
 # ================================================================
 add_subdirectory(Application)
@@ -82,11 +87,13 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
 list(REMOVE_ITEM CMAKE_C_IMPLICIT_LINK_LIBRARIES ob)
 
 # Add linked libraries
-# 链接顺序: STM32_Drivers(HAL) → Start → bsp → app
+# 链接: HAL/Start → Middleware → BSP → App
+#   (middleware 封装了所有中间件, 可执行文件不直接链接内部的 fatfs/mw_port)
 target_link_libraries(${CMAKE_PROJECT_NAME}
     stm32cubemx
     STM32_Drivers
     start
+    middleware
     bsp
     app
 

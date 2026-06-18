@@ -10,7 +10,7 @@
 - **Build system**: CMake 3.22+ + Ninja
 - **C standard**: C11 (gnu11 extensions)
 - **Output**: `build/Debug/HAL_TEST_Board.elf`
-- **Current firmware size**: ~26KB FLASH, ~5KB RAM (Debug -O0, with SPI+I2C HAL)
+- **Current firmware size**: ~56KB FLASH, ~6KB RAM (Debug -O0, with SD+FatFS+I2C+SPI HAL)
 
 ## Quick Build
 
@@ -37,8 +37,11 @@ Claude Code shortcuts: `/build-stm32` (build), `/flash-stm32` (flash), `/reset-s
 ## Architecture
 
 ```
-Application/           ← business logic + Test/ 测试模块
-  └─ Test/             ← 统一测试头 test.h + 各外设测试 .c
+Application/           ← business logic + Test/ 测试模块 + Modules/ 胶水层
+  ├─ Test/             ← 统一测试头 test.h + 各外设测试 .c
+  └─ Modules/          ← 平台胶水层 (fatfs_diskio.c 等)
+    ↓ depends on
+ThirdParty/            ← 第三方中间件 (FatFS, FreeRTOS...)
     ↓ depends on
 BSP/                   ← board abstraction; ONLY layer that includes HAL
     ↓ depends on
@@ -63,6 +66,7 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | `Application/Test/test_rtc.c` | RTC 交互: 定时打印 + 串口命令 T/D/S/U/I/H |
 | `Application/Test/test_eeprom.c` | EEPROM 读写验证: AT24C02 全片擦除→写入模式→读回校验 |
 | `Application/Test/test_spi_flash.c` | SPI Flash 读写验证: W25Q64 ID→扇区擦→写→读→校验 |
+| `Application/Test/test_sdcard_fatfs.c` | SD Card + FatFS 读写验证: 挂载→写文件→读回校验→PASS/FAIL |
 | `BSP/Inc/bsp_systick.h` | SysTick: `BSP_SYSTICK_DelayInit/DelayUS/DelayMS()` |
 | `BSP/Src/bsp_systick.c` | 时钟配置 (HSE→PLL→72MHz) + us/ms 阻塞延时 |
 | `BSP/Inc/bsp_led.h` | LED: `BSP_LED_Init/On/Off/Toggle(BSP_LED_Id_t id)` |
@@ -83,6 +87,10 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | `BSP/Src/bsp_spi.c` | SPI 实现: HAL SPI 主机模式 18MHz, NSS 软件管理 |
 | `BSP/Inc/bsp_spi_flash.h` | SPI Flash: W25Q64 指令集, JEDEC ID=0xEF4017, 8MB 容量 |
 | `BSP/Src/bsp_spi_flash.c` | SPI Flash 实现: CS=PA4, 页写/扇区擦/块擦/全片擦, 轮询 BUSY |
+| `BSP/Inc/bsp_sdcard.h` | SD Card: `BSP_SDCARD_Init/Read/Write/GetInfo/IsReady` — SDIO DMA |
+| `BSP/Src/bsp_sdcard.c` | SD Card 实现: HW映射表+DMA+ISR+MSP全自包含, 阻塞式扇区读写 |
+| `ThirdParty/FatFs/` | FatFS R0.15a — `ff.c/h`, `ffconf.h`, `diskio.h` (核心库) |
+| `Application/Modules/fatfs_diskio.c` | FatFS 平台胶水层 — `disk_read/write/ioctl` → BSP |
 | `Start/startup_stm32f103xe.s` | Vector table, Reset_Handler |
 | `Start/STM32F103XX_FLASH.ld` | Linker script — memory regions + sections |
 | `Start/stm32f1xx_hal_conf.h` | HAL module enable/disable switches |
@@ -114,6 +122,12 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | PB10/PB11 | USART3 TX/RX | (reserved) |
 | PC10/PC11 | UART4 TX/RX | (reserved) |
 | PC12/PD2 | UART5 TX/RX | (reserved) |
+| PC8 | SDIO_D0 | SD Card Data 0 |
+| PC9 | SDIO_D1 | SD Card Data 1 |
+| PC10 | SDIO_D2 | SD Card Data 2 |
+| PC11 | SDIO_D3 | SD Card Data 3 |
+| PC12 | SDIO_CK | SD Card Clock |
+| PD2 | SDIO_CMD | SD Card Command |
 
 All LED pins: push-pull, no pull-up/down, high speed. BEEP: push-pull, no pull-up/down, active-high.
 
@@ -148,6 +162,7 @@ Flash latency = 2WS. SysTick = 1ms via `HAL_IncTick()`.
 | RTC | `HAL_RTC_MODULE_ENABLED` | `hal_rtc.c` + `hal_rtc_ex.c` |
 | SPI | `HAL_SPI_MODULE_ENABLED` | `hal_spi.c` |
 | I2C | `HAL_I2C_MODULE_ENABLED` | `hal_i2c.c` |
+| SD | `HAL_SD_MODULE_ENABLED` | `hal_sd.c` + `ll_sdmmc.c` |
 
 **启用新模块的两步操作**:
 1. `Start/stm32f1xx_hal_conf.h` → 取消注释/添加 `#define HAL_xxx_MODULE_ENABLED`
@@ -185,8 +200,9 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | `Application/DataManager/` | Global state management (empty — future) |
 | `Application/Communication/` | Protocol stacks (empty — future) |
 | `Application/Tasks/` | RTOS task organization (empty — future) |
+| `ThirdParty/` | Middleware: FatFS, FreeRTOS, ... (各自有 CMakeLists) |
+| `Application/Modules/` | 平台胶水层 (fatfs_diskio 等) + 独立硬件模块 |
 | `Services/` | Platform services (empty — future) |
-| `ThirdParty/` | Middleware: FreeRTOS, FatFs, etc. (empty — future) |
 
 ## Conventions
 
@@ -252,6 +268,7 @@ typedef enum { BSP_I2C_OK = 0, BSP_I2C_ERROR, BSP_I2C_TIMEOUT } BSP_I2C_Status_t
 | `Test_RTC_Interactive()` | RTC timestamp output + serial commands (T/D/S/U/I/H) |
 | `Test_EEPROM_ReadWrite()` | AT24C02 full erase → write pattern → read verify via I2C |
 | `Test_SPI_FLASH_ReadWrite()` | W25Q64 JEDEC ID → sector erase → write → verify via SPI |
+| `Test_SDCARD_FatFS()` | SD Card init → FatFS mount → write test.txt → read verify |
 
 Default: `Test_RTC_Interactive()`. Switch by commenting/uncommenting the test function call in `main()`.
 
@@ -274,7 +291,12 @@ Default: `Test_RTC_Interactive()`. Switch by commenting/uncommenting the test fu
 | HAL ADC | 0.3KB | Init (only used functions) |
 | Startup + vectors | ~3KB | startup, system_stm32f1xx, syscalls |
 | Other (const data, etc.) | ~5KB | rodata, interrupt vectors, etc. |
-| **Total** | **~26KB** | |
+| FatFS core | ~12KB | ff.c (FF_USE_LFN=0, FF_USE_MKFS=1) |
+| HAL SD | ~3.5KB | Init, InitCard, Read/Write Blocks, DMA, IRQ |
+| BSP SD Card | ~2KB | CMD16+Polling+DMA+MSP+ISR, SDSC: HW块→512B转换+CMD13轮询 |
+| Test SD+FatFS | ~1KB | test_sdcard_fatfs.c (auto f_mkfs FAT32) |
+| diskio glue | ~0.5KB | FatFS ↔ BSP bridge |
+| **Total** | **~56KB** | |
 
 Debug -O0 is typically 2-3× larger than Release -Os. Standard library equivalent firmware would be ~8-12KB.
 

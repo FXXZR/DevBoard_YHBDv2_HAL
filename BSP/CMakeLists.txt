@@ -28,6 +28,7 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_eeprom.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi_flash.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sdcard.c
 )
 
 # BSP 对外暴露的头文件路径（应用层需要 #include "bsp_xxx.h"）
