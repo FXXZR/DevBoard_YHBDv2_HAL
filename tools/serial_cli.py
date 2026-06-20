@@ -22,7 +22,7 @@ import serial
 
 def main():
     parser = argparse.ArgumentParser(description="Serial CLI for STM32")
-    parser.add_argument("--port", default="COM5")
+    parser.add_argument("--port", default="COM6")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--send", default=None, help="字符串 (支持 \\r\\n 转义)")
     parser.add_argument("--read", type=float, default=0.5, help="读取等待秒数")

@@ -25,6 +25,8 @@
 #include "bsp_eeprom.h"
 #include "bsp_spi_flash.h"
 #include "bsp_sdcard.h"
+#include "bsp_rs485.h"
+#include "bsp_esp8266.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -86,6 +88,30 @@ void Test_SPI_FLASH_ReadWrite(void);
  *         不自动格式化，保护已有数据。
  */
 void Test_SDCARD_FatFS(void);
+
+/**
+ * @brief  RS485 ↔ USART1 透传测试
+ * @note   将 USART1 (PC 串口终端) 与 RS485 (USART2 + SIT3088EESA)
+ *         之间的数据双向透明转发, 实现 PC ↔ RS485 设备的透传通信。
+ *         默认 115200-8-N-1, 可通过 PASSTHROUGH_BAUDRATE 宏修改。
+ */
+void Test_RS485_Passthrough(void);
+
+/**
+ * @brief  ESP8266 透传测试 — USART1 ↔ ESP8266 (USART3) 双向桥接
+ * @note   将 USART1 (PC 串口终端) 与 ESP8266 (USART3) 之间的数据
+ *         双向透明转发, 实现 PC ↔ ESP8266 的 AT 命令交互。
+ *         支持本地控制命令: !help / !reset / !info
+ *         默认 115200-8-N-1, 可通过 ESP8266_BAUDRATE 宏修改。
+ */
+void Test_ESP8266_Passthrough(void);
+
+/**
+ * @brief  USART1 DMA 收发回显测试
+ * @note   RX:DMA + TX:DMA. 半满中断提前发送, IDLE 发送剩余.
+ *         帧长 >256B 时分段回显 (先发 128B, IDLE 后发剩余).
+ */
+void Test_DMA_Echo(void);
 
 #ifdef __cplusplus
 }

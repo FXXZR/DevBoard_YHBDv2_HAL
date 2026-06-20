@@ -57,9 +57,12 @@ int main(void) {
     // Test_EEPROM_ReadWrite();   /* AT24C02 全片写入 + 读出校验 */
     // Test_SPI_FLASH_ReadWrite(); /* W25Q64 全片写入 + 读出校验 */
 
-    Test_SDCARD_FatFS();        /* SD Card + FatFS 读写验证 */
+    // Test_SDCARD_FatFS();        /* SD Card + FatFS 读写验证 */
 
-    Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
+    // Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
+    // Test_RS485_Passthrough();    /* RS485 ↔ USART1 透传测试 */
+    // Test_ESP8266_Passthrough();   /* ESP8266 透传测试 */
+    Test_DMA_Echo();              /* USART1 DMA 收发回显测试 */
     /* ---- 不会执行到这里 (测试函数内部有死循环) ---- */
     while (1) {
         /* 回退: LED 交替闪烁 + USART1 回显 */

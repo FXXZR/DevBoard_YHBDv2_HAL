@@ -149,13 +149,17 @@ static void rtc_restore_date_to_hal(void)
 }
 
 /* ================================================================
- * 内部: 冷启动完整配置
+ * 内部: RTC 时钟源配置 (冷/热启动均需调用)
+ *
+ * LSI 在 VDD 主电源域, 每次系统复位后硬件自动清零 LSION 位;
+ * LSE 在 VBAT 备份域, 复位后保持。因此无论冷启动还是热启动,
+ * 都必须重新使能所选时钟源并设置 RTC 时钟选择。
  * ================================================================ */
 
-static void rtc_cold_init(void)
+static void rtc_config_clocksource(void)
 {
-    /* ---- 1. 配置时钟源 ---- */
     RCC_OscInitTypeDef osc = {0};
+
 #if defined(BSP_RTC_CLK_LSE)
     osc.OscillatorType = RCC_OSCILLATORTYPE_LSE;
     osc.LSEState       = RCC_LSE_ON;
@@ -189,8 +193,18 @@ static void rtc_cold_init(void)
     pclk.RTCClockSelection    = RCC_RTCCLKSOURCE_LSI;
     HAL_RCCEx_PeriphCLKConfig(&pclk);
 #endif
+}
 
-    /* ---- 2. 使能 RTC ---- */
+/* ================================================================
+ * 内部: 冷启动完整配置 (含默认值写入 + BKP 初始化)
+ * ================================================================ */
+
+static void rtc_cold_init(void)
+{
+    /* ---- 1. 配置时钟源 ---- */
+    rtc_config_clocksource();
+
+    /* ---- 2. 使能并初始化 RTC ---- */
     __HAL_RCC_RTC_ENABLE();
     rtc_handle.Instance          = RTC;
     rtc_handle.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
@@ -233,10 +247,18 @@ void BSP_RTC_Init(void)
 
     uint32_t magic = HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MAGIC);
     if (magic != RTC_MAGIC_VALUE) {
-        /* 冷启动: VBAT 掉电过, 完整配置 LSE + RTC */
+        /* 冷启动: VBAT 掉电过, 完整配置 时钟源 + RTC + 默认值 + BKP */
         rtc_cold_init();
     } else {
-        /* 热启动: RTC 一直在跑, 仅重建 APB 接口 + 恢复日期 */
+        /* 热启动: RTC 一直在跑, 重新使能时钟源 + 重建 APB 接口 + 恢复日期
+         *
+         * 注意: 无论 LSE 还是 LSI, 系统复位后都必须重新调用
+         * rtc_config_clocksource().
+         *   - LSI: 在 VDD 主域, 复位后 LSION 位被硬件清零 → 必须重新使能
+         *   - LSE: 虽然在 VBAT 备份域可保留, 但某些复位场景下仍可能丢失,
+         *     且 HAL_RCC_OscConfig(LSE) 对已使能的 LSE 是幂等的
+         */
+        rtc_config_clocksource();
         rtc_handle.Instance = RTC;
         __HAL_RCC_RTC_ENABLE();
         HAL_RTC_WaitForSynchro(&rtc_handle);

@@ -24,7 +24,7 @@ import serial
 
 def main():
     parser = argparse.ArgumentParser(description="Reset STM32 and capture boot banner")
-    parser.add_argument("--port", default="COM5")
+    parser.add_argument("--port", default="COM6")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--wait", type=float, default=4.0)
     parser.add_argument("--target", default="stm32f103ze")

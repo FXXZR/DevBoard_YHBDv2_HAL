@@ -1,8 +1,11 @@
 /**
  * @file    bsp_usart.h
  * @brief   BSP USART 驱动接口 —— 平台无关的串口收发 API
- * @note    本文件只暴露抽象接口，不包含任何 HAL/寄存器依赖。
- *          所有 5 路 USART 统一管理，中断收发，环形缓冲。
+ * @note    所有 5 路 USART 统一管理.
+ *          RX: HAL_UARTEx_ReceiveToIdle_IT / _DMA → 线性缓冲 → IDLE 回调
+ *          TX: IT / DMA 发送, 线性缓冲, SendDirect 零拷贝.
+ *          USART5 硬件不支持 DMA, use_dma_* 设置被忽略.
+ *          DMA 通道映射参见 bsp_usart.c 中 usart_hw_map[].
  */
 
 #ifndef __BSP_USART_H__
@@ -15,7 +18,7 @@ extern "C" {
 #endif
 
 /* ================================================================
- * 串口编号枚举 —— 应用层通过逻辑编号控制，无需关心物理引脚
+ * 串口编号枚举
  * ================================================================ */
 typedef enum {
     BSP_USART1 = 0,     /* USART1 — TX=PA9,  RX=PA10 (APB2, 72MHz) */
@@ -23,11 +26,11 @@ typedef enum {
     BSP_USART3,         /* USART3 — TX=PB10, RX=PB11 (APB1, 36MHz) */
     BSP_USART4,         /* UART4  — TX=PC10, RX=PC11 (APB1, 36MHz) */
     BSP_USART5,         /* UART5  — TX=PC12, RX=PD2  (APB1, 36MHz) */
-    BSP_USART_COUNT     /* 串口总数（自动计算） */
+    BSP_USART_COUNT
 } BSP_USART_Id_t;
 
 /* ================================================================
- * 串口配置枚举（平台无关，对应但不依赖 HAL）
+ * 串口配置枚举
  * ================================================================ */
 
 /** @brief 数据字长 */
@@ -49,12 +52,27 @@ typedef enum {
     BSP_USART_PARITY_ODD,       /* 奇校验 */
 } BSP_USART_Parity_t;
 
-/** @brief 串口初始化配置结构体（InitEx 使用） */
+/** @brief TX 发送完成回调（NULL = 不回调），在 ISR 上下文中调用 */
+typedef void (*BSP_USART_TxCpltCallback_t)(void);
+
+/** @brief RX IDLE 帧结束回调（NULL = 不回调）
+ *  @param id 触发回调的串口编号
+ *  @note  在 ISR 上下文中执行，必须快速返回.
+ *          回调内调用 BSP_USART_Available(id) 获取帧长,
+ *          BSP_USART_ReadBytes(id, buf, len) 读取数据.
+ *          回调返回后 BSP 自动重新装填接收缓冲. */
+typedef void (*BSP_USART_RxIdleCallback_t)(BSP_USART_Id_t id);
+
+/** @brief 串口初始化配置结构体 */
 typedef struct {
-    uint32_t               baudrate;     /* 波特率 (如 9600, 115200, 921600) */
-    BSP_USART_WordLength_t word_length;  /* 数据字长 */
-    BSP_USART_StopBits_t   stop_bits;    /* 停止位   */
-    BSP_USART_Parity_t     parity;       /* 奇偶校验 */
+    uint32_t                    baudrate;          /* 波特率 */
+    BSP_USART_WordLength_t      word_length;       /* 数据字长 */
+    BSP_USART_StopBits_t        stop_bits;         /* 停止位 */
+    BSP_USART_Parity_t          parity;            /* 奇偶校验 */
+    BSP_USART_TxCpltCallback_t  tx_cplt_callback;  /* TX 完成回调 (NULL = 无) */
+    BSP_USART_RxIdleCallback_t  rx_idle_callback;  /* RX IDLE 回调 (NULL = 无) */
+    uint8_t                     use_dma_rx;        /* 0=IT 接收, 1=DMA 接收 */
+    uint8_t                     use_dma_tx;        /* 0=IT 发送, 1=DMA 发送 */
 } BSP_USART_Config_t;
 
 /* ================================================================
@@ -62,98 +80,79 @@ typedef struct {
  * ================================================================ */
 
 /**
- * @brief  简易初始化指定串口（8-N-1，仅指定波特率）
- * @param  id       串口编号 (BSP_USART1 ~ BSP_USART5)
- * @param  baudrate 波特率 (如 9600, 115200, 921600)
- * @note   必须在 HAL_Init() + SystemClock_Config() 之后调用
+ * @brief  简易初始化 (8-N-1, IT 收发, 无回调)
+ * @param  id       串口编号
+ * @param  baudrate 波特率
  */
 void BSP_USART_Init(BSP_USART_Id_t id, uint32_t baudrate);
 
 /**
- * @brief  完整初始化指定串口（可指定全部串口参数）
- * @param  id     串口编号 (BSP_USART1 ~ BSP_USART5)
- * @param  config 串口配置指针
- * @note   必须在 HAL_Init() + SystemClock_Config() 之后调用
+ * @brief  完整初始化 (全参数可配)
+ * @param  id     串口编号
+ * @param  config 配置指针 (包含 DMA 开关 + 回调)
  */
 void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config);
 
 /**
- * @brief  关闭并去初始化指定串口（释放 GPIO，关闭时钟，清空缓冲区）
- * @param  id  串口编号
+ * @brief  关闭并去初始化 (释放 GPIO/DMA, 关闭时钟, 清空缓冲)
  */
 void BSP_USART_DeInit(BSP_USART_Id_t id);
 
 /* ----------------------------------------------------------------
- * 发送 (中断方式, 非阻塞)
+ * 发送 (IT 或 DMA, 非阻塞)
  * ---------------------------------------------------------------- */
 
 /**
- * @brief  中断发送数据（拷贝到内部 TX 环形缓冲后立即返回）
- * @param  id   串口编号
- * @param  data 待发送数据指针（调用后即可释放/复用）
- * @param  len  数据长度（字节）
- * @return 成功入队的字节数，0 = 缓冲区满/忙/未初始化
- * @note   返回 < len 说明内部缓冲区空间不足，调用方需自行分段 + 等待
+ * @brief  发送数据 (拷入内部 TX 缓冲后立即返回)
+ * @return 实际入队的字节数, 0 = 忙/未初始化
+ * @note   use_dma_tx=1 时通过 DMA 发送, =0 时通过 IT 发送.
+ *         返回 < len 说明内部缓冲区空间不足.
  */
 uint16_t BSP_USART_Send(BSP_USART_Id_t id, const uint8_t *data, uint16_t len);
 
 /**
- * @brief  中断发送数据（零拷贝，直接使用用户缓冲区，不拷贝）
- * @param  id   串口编号
- * @param  data 待发送数据指针（必须保持有效直到 BSP_USART_Flush 返回 0！）
- * @param  len  数据长度（字节），无上限
- * @return len = 发送已启动, 0 = 串口忙/未初始化
- * @note   适合发送长数据/大包, 省一次拷贝; 代价是调用方保证 buffer 生命周期
+ * @brief  零拷贝发送 (直接使用用户缓冲区, 不拷贝)
+ * @return len = 已启动, 0 = 忙/未初始化
+ * @note   用户必须保证 buffer 生命周期直到 BSP_USART_Flush 返回 0.
  */
 uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t len);
 
 /**
- * @brief  发送字符串（调用 BSP_USART_Send 的便捷封装）
- * @param  id  串口编号
- * @param  str 以 '\0' 结尾的 C 字符串（调用后即可释放）
- * @return 成功入队的字节数（不含 '\0'），或 0
+ * @brief  发送字符串 (便捷封装)
+ * @return 入队字节数 (不含 '\0')
  */
 uint16_t BSP_USART_SendString(BSP_USART_Id_t id, const char *str);
 
 /**
- * @brief  等待发送完成（阻塞，直到内部 TX 环形缓冲排空 + 最后帧发送完毕）
- * @param  id       串口编号
- * @param  timeout  超时时间（毫秒），0 = 死等
- * @return 0 = 发送完成, 非 0 = 超时
+ * @brief  等待发送完成 (阻塞)
+ * @param  timeout 超时 ms, 0 = 死等
+ * @return 0 = 完成, -1 = 超时
  */
 int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout);
 
 /* ----------------------------------------------------------------
- * 接收 (中断方式, 环形缓冲)
+ * 接收 (线性缓冲 + 回调)
  * ---------------------------------------------------------------- */
 
 /**
- * @brief  查询接收缓冲区中可读字节数
- * @param  id  串口编号
- * @return 可读字节数（0 = 无数据）
+ * @brief  查询可读字节数
  */
 uint16_t BSP_USART_Available(BSP_USART_Id_t id);
 
 /**
- * @brief  读取一个字节（非阻塞）
- * @param  id  串口编号
- * @param  ch  输出参数，读取到的字节
- * @return 0 = 成功, -1 = 缓冲区空
+ * @brief  读一个字节 (非阻塞)
+ * @return 0 = 成功, -1 = 缓冲空
  */
 int BSP_USART_Read(BSP_USART_Id_t id, uint8_t *ch);
 
 /**
- * @brief  读取多个字节（非阻塞，返回实际读取到的数量）
- * @param  id  串口编号
- * @param  buf 接收缓冲区
- * @param  len 期望读取的字节数
- * @return 实际读取到的字节数（可能小于 len）
+ * @brief  读多个字节 (非阻塞)
+ * @return 实际读取到的字节数 (可能 < len)
  */
 uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len);
 
 /**
- * @brief  清空指定串口的接收缓冲区
- * @param  id  串口编号
+ * @brief  清空接收缓冲 (丢弃所有未读数据)
  */
 void BSP_USART_FlushRx(BSP_USART_Id_t id);
 
