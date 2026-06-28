@@ -13,7 +13,12 @@
  */
 
 #include "bsp_sdcard.h"
+#include "bsp_systick.h"
 #include "stm32f1xx_hal.h"
+
+/* 本地延时封装 — 换平台只需改此两行 */
+static inline void delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
+static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
 
 /* ================================================================
  * 硬件映射表
@@ -253,12 +258,14 @@ static void s_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
  */
 static BSP_SDCARD_Status_t s_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_ms)
 {
-    uint32_t tick_start = HAL_GetTick();
+    uint32_t elapsed = 0;
 
     while (!ctx->transfer_done && !ctx->transfer_error) {
-        if ((HAL_GetTick() - tick_start) >= timeout_ms) {
+        if (elapsed >= timeout_ms) {
             return BSP_SDCARD_TIMEOUT;
         }
+        delay_us(1000);   /* 1ms 轮询 */
+        elapsed++;
     }
 
     if (ctx->transfer_error) {
@@ -323,11 +330,10 @@ static BSP_SDCARD_Status_t s_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf,
     ctx->hsd.SdCard.BlockSize = saved_bs;
     if (hal_ret != HAL_OK) return BSP_SDCARD_ERROR;
 
-    /* 写后必须轮询卡状态 (CMD13) 直到退出编程态. 标准库的 SD_WaitWriteOperation()
-     * + while(SD_GetStatus()!=SD_TRANSFER_OK) 正是这样做的. */
+    /* 写后必须轮询卡状态 (CMD13) 直到退出编程态. */
     {
-        uint32_t t0 = HAL_GetTick();
-        uint32_t rca = ctx->hsd.SdCard.RelCardAdd;
+        uint32_t elapsed    = 0;  /* ms */
+        uint32_t rca        = ctx->hsd.SdCard.RelCardAdd;
         SDIO_CmdInitTypeDef sdio_cmd = {
             .Argument         = (uint32_t)(rca << 16),
             .CmdIndex         = 13,  /* SEND_STATUS */
@@ -337,17 +343,20 @@ static BSP_SDCARD_Status_t s_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf,
         };
         do {
             SDIO_SendCommand(ctx->hsd.Instance, &sdio_cmd);
-            /* 等待命令响应完成 */
-            uint32_t t1 = HAL_GetTick();
+            /* 等待命令响应完成 (50ms 超时) */
+            uint32_t cmd_elapsed = 0;
             while (!__HAL_SD_GET_FLAG(&ctx->hsd, SDIO_FLAG_CMDREND)) {
-                if ((HAL_GetTick() - t1) >= 50) break;
+                if (cmd_elapsed >= 50) break;
+                delay_us(100);
+                cmd_elapsed++;   /* ≈ 0.1ms */
             }
             __HAL_SD_CLEAR_FLAG(&ctx->hsd, SDIO_STATIC_FLAGS);
-            uint32_t resp = SDIO_GetResponse(ctx->hsd.Instance, SDIO_RESP1);
+            uint32_t resp  = SDIO_GetResponse(ctx->hsd.Instance, SDIO_RESP1);
             uint32_t state = (resp >> 9) & 0x0F;
             if (state == 4) break;  /* 4 = Transfer state */
-            if ((HAL_GetTick() - t0) >= BSP_SDCARD_TIMEOUT_WRITE) return BSP_SDCARD_TIMEOUT;
-            HAL_Delay(5);
+            if (elapsed >= BSP_SDCARD_TIMEOUT_WRITE) return BSP_SDCARD_TIMEOUT;
+            delay_ms(5);
+            elapsed += 5;
         } while (1);
     }
     return BSP_SDCARD_OK;

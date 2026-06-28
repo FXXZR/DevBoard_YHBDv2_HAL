@@ -9,9 +9,9 @@
 #   Communication/       通信协议栈
 #   Tasks/               RTOS 任务组织
 #
-# 依赖: middleware (ff.h/ffconf.h 等) + bsp (板级支持包)
+# 依赖: middleware (聚合 fatfs/ffconf.h 等) + bsp (板级支持包)
 #       应用层不直接使用 HAL API —— 通过 BSP 访问硬件
-#       middleware 封装了所有第三方库, app 不需要逐个链接
+#       middleware (STATIC) 聚合所有中间件, app 不需要逐个链接
 # ================================================================
 
 add_library(app OBJECT)
@@ -32,10 +32,13 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_sram.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_lcd.c
 
-    # 后续新增应用模块在这里添加，例如:
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Common/app_data_model.c
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Modules/SensorA/sensorA_drv.c
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_sensors.c
+    # FreeRTOS 移植钩子 (HAL 桥接)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Common/rtos_port_hooks.c
+
+    # ---- RTOS 任务 ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_init.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_led.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_test.c
 )
 
 # ---- 头文件路径 ----
@@ -43,9 +46,7 @@ target_include_directories(app PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}            # 根: main.c 所在
     ${CMAKE_CURRENT_SOURCE_DIR}/Common     # 公共头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/Test       # 测试模块头文件
-    # 后续:
-    # ${CMAKE_CURRENT_SOURCE_DIR}/Modules
-    # ${CMAKE_CURRENT_SOURCE_DIR}/DataManager
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks      # RTOS 任务头文件
 )
 
 # ---- 依赖 ----

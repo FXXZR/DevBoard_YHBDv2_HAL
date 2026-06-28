@@ -9,9 +9,13 @@
  */
 
 #include "bsp_usart.h"
+#include "bsp_systick.h"
 #include "stm32f1xx_hal.h"
 
 #include <string.h>
+
+/* 本地延时封装 — 换平台只需改此行 */
+static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
 
 /* ================================================================
  * 配置常量
@@ -31,33 +35,51 @@ typedef struct {
     GPIO_TypeDef         *rx_port;
     uint16_t              rx_pin;
     IRQn_Type             irq_n;
-    DMA_Channel_TypeDef  *dma_rx_ch;      /* RX DMA (NULL=无) */
+    uint8_t               irq_prio;         /* NVIC 优先级 (0=最高, 15=最低) */
+    DMA_Channel_TypeDef  *dma_rx_ch;        /* RX DMA (NULL=无) */
     IRQn_Type             dma_rx_irq;
-    DMA_Channel_TypeDef  *dma_tx_ch;      /* TX DMA (NULL=无) */
+    uint8_t               dma_rx_prio;      /* DMA RX NVIC 优先级 */
+    DMA_Channel_TypeDef  *dma_tx_ch;        /* TX DMA (NULL=无) */
     IRQn_Type             dma_tx_irq;
+    uint8_t               dma_tx_prio;      /* DMA TX NVIC 优先级 */
 } USART_HW_Map_t;
 
 static const USART_HW_Map_t usart_hw_map[BSP_USART_COUNT] = {
     [BSP_USART1] = { .instance = USART1, .tx_port = GPIOA, .tx_pin = GPIO_PIN_9,
                      .rx_port = GPIOA, .rx_pin = GPIO_PIN_10, .irq_n = USART1_IRQn,
+                     .irq_prio = 7,
                      .dma_rx_ch = DMA1_Channel5, .dma_rx_irq = DMA1_Channel5_IRQn,
-                     .dma_tx_ch = DMA1_Channel4, .dma_tx_irq = DMA1_Channel4_IRQn },
+                     .dma_rx_prio = 5,
+                     .dma_tx_ch = DMA1_Channel4, .dma_tx_irq = DMA1_Channel4_IRQn,
+                     .dma_tx_prio = 6 },
     [BSP_USART2] = { .instance = USART2, .tx_port = GPIOA, .tx_pin = GPIO_PIN_2,
                      .rx_port = GPIOA, .rx_pin = GPIO_PIN_3,  .irq_n = USART2_IRQn,
+                     .irq_prio = 7,
                      .dma_rx_ch = DMA1_Channel6, .dma_rx_irq = DMA1_Channel6_IRQn,
-                     .dma_tx_ch = DMA1_Channel7, .dma_tx_irq = DMA1_Channel7_IRQn },
+                     .dma_rx_prio = 5,
+                     .dma_tx_ch = DMA1_Channel7, .dma_tx_irq = DMA1_Channel7_IRQn,
+                     .dma_tx_prio = 6 },
     [BSP_USART3] = { .instance = USART3, .tx_port = GPIOB, .tx_pin = GPIO_PIN_10,
                      .rx_port = GPIOB, .rx_pin = GPIO_PIN_11, .irq_n = USART3_IRQn,
+                     .irq_prio = 7,
                      .dma_rx_ch = DMA1_Channel3, .dma_rx_irq = DMA1_Channel3_IRQn,
-                     .dma_tx_ch = DMA1_Channel2, .dma_tx_irq = DMA1_Channel2_IRQn },
+                     .dma_rx_prio = 5,
+                     .dma_tx_ch = DMA1_Channel2, .dma_tx_irq = DMA1_Channel2_IRQn,
+                     .dma_tx_prio = 6 },
     [BSP_USART4] = { .instance = UART4,  .tx_port = GPIOC, .tx_pin = GPIO_PIN_10,
                      .rx_port = GPIOC, .rx_pin = GPIO_PIN_11, .irq_n = UART4_IRQn,
+                     .irq_prio = 7,
                      .dma_rx_ch = DMA2_Channel3, .dma_rx_irq = DMA2_Channel3_IRQn,
-                     .dma_tx_ch = DMA2_Channel5, .dma_tx_irq = DMA2_Channel4_5_IRQn },
+                     .dma_rx_prio = 5,
+                     .dma_tx_ch = DMA2_Channel5, .dma_tx_irq = DMA2_Channel4_5_IRQn,
+                     .dma_tx_prio = 6 },
     [BSP_USART5] = { .instance = UART5,  .tx_port = GPIOC, .tx_pin = GPIO_PIN_12,
                      .rx_port = GPIOD, .rx_pin = GPIO_PIN_2,  .irq_n = UART5_IRQn,
+                     .irq_prio = 7,
                      .dma_rx_ch = NULL,   .dma_rx_irq = 0,
-                     .dma_tx_ch = NULL,   .dma_tx_irq = 0 },
+                     .dma_rx_prio = 0,
+                     .dma_tx_ch = NULL,   .dma_tx_irq = 0,
+                     .dma_tx_prio = 0 },
 };
 
 /* ================================================================
@@ -301,7 +323,7 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
     huart->Init.OverSampling = UART_OVERSAMPLING_16;
     HAL_UART_Init(huart);
 
-    HAL_NVIC_SetPriority(hw->irq_n, 1, 0);
+    HAL_NVIC_SetPriority(hw->irq_n, hw->irq_prio, 0);
     HAL_NVIC_EnableIRQ(hw->irq_n);
 
     ctx->tx_cplt_cb = config->tx_cplt_callback;
@@ -321,7 +343,7 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
         ctx->hdma_rx.Init.Priority            = DMA_PRIORITY_MEDIUM;
         HAL_DMA_Init(&ctx->hdma_rx);
         __HAL_LINKDMA(huart, hdmarx, ctx->hdma_rx);
-        HAL_NVIC_SetPriority(hw->dma_rx_irq, 1, 0);
+        HAL_NVIC_SetPriority(hw->dma_rx_irq, hw->dma_rx_prio, 0);
         HAL_NVIC_EnableIRQ(hw->dma_rx_irq);
     }
 
@@ -341,7 +363,7 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
         __HAL_LINKDMA(huart, hdmatx, ctx->hdma_tx);
         /* DMA_TX IRQ: UART4 与 SDIO 共享, 仅 USART1-3 在此注册 */
         if (hw->dma_tx_irq != DMA2_Channel4_5_IRQn) {
-            HAL_NVIC_SetPriority(hw->dma_tx_irq, 1, 0);
+            HAL_NVIC_SetPriority(hw->dma_tx_irq, hw->dma_tx_prio, 0);
             HAL_NVIC_EnableIRQ(hw->dma_tx_irq);
         }
     }
@@ -426,9 +448,11 @@ int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout)
     USART_Ctx_t *ctx = &usart_ctx[id];
     if (!ctx->initialized) return -1;
 
-    uint32_t tickstart = HAL_GetTick();
+    uint32_t elapsed = 0;
     while (ctx->tx_busy) {
-        if (timeout > 0 && (HAL_GetTick() - tickstart) >= timeout) return -1;
+        if (timeout > 0 && elapsed >= timeout) return -1;
+        delay_us(1000);
+        elapsed++;
     }
     return 0;
 }

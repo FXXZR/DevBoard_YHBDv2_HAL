@@ -19,7 +19,11 @@
 
 #include "bsp_spi_flash.h"
 #include "bsp_spi.h"
+#include "bsp_systick.h"
 #include "stm32f1xx_hal.h"
+
+/* 本地延时封装 — 换平台只需改此行 */
+static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
 
 /* ================================================================
  * CS 引脚定义 (PA4, 软件控制) — 寄存器位操作宏
@@ -80,11 +84,14 @@ static uint8_t s_flash_read_status(void)
  */
 static BSP_SPI_FLASH_Status_t s_flash_wait_busy(uint32_t timeout_ms)
 {
-    uint32_t start = HAL_GetTick();
+    uint32_t elapsed_us = 0;
+    uint32_t limit_us   = timeout_ms * 1000U;
     while (s_flash_read_status() & kStatusBusy) {
-        if ((HAL_GetTick() - start) >= timeout_ms) {
+        if (elapsed_us >= limit_us) {
             return BSP_SPI_FLASH_TIMEOUT;
         }
+        delay_us(100);
+        elapsed_us += 100;
     }
     return BSP_SPI_FLASH_OK;
 }

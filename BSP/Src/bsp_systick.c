@@ -2,23 +2,17 @@
  * @file    bsp_systick.c
  * @brief   BSP SysTick 延时与系统时钟实现
  * @note    系统时钟: HSE 8MHz → PLL ×9 → SYSCLK 72MHz
- *          us 延时:  SysTick->VAL 轮询（利用 HAL 已配置的 1ms 自动重载计数器）
- *          ms 延时:  HAL_GetTick() 轮询
  *
- *          SysTick 在 HAL_Init() 中已被配置为:
- *            时钟源 = SystemCoreClock (72MHz)
- *            LOAD   = SystemCoreClock/1000 - 1 = 71999
- *            模式   = 自动重载 + 中断使能
- *            每 1ms 触发一次 SysTick_Handler → HAL_IncTick()
+ *          SysTick 在 BSP_SYSTICK_DelayInit() 中手动配置寄存器:
+ *            LOAD = SystemCoreClock/1000 - 1 = 71999 (1ms)
+ *            计数器启用, 中断关闭
+ *            (HAL_SYSTICK_Config / SysTick_Config 会强制开中断, 故不用)
  *
- *          us 延时原理：
- *            读两次 SysTick->VAL（递减计数器），差值即为经过的 CPU 周期数。
- *            自动处理计数器回绕（每 1ms 一次），支持任意长度延时。
- *            不修改 SysTick 配置，不影响 HAL 时基。
+ *          us 延时:  SysTick->VAL 轮询 (不依赖中断)
+ *          ms 延时:  BSP_SYSTICK_DelayUS 循环包装 (不依赖 HAL_GetTick)
  *
- *          与原 STD 方案对比：
- *            旧: SysTick->LOAD=0xFFFFFF, 不用中断, 纯轮询
- *            新: 复用 HAL 的 SysTick 配置, 不关中断, 与 HAL/RTOS 共存
+ *          裸机: 取消 BSP_SYSTICK_DelayInit() 中 TICKINT 注释
+ *          RTOS: FreeRTOS 通过 xPortStartScheduler 接管中断
  */
 
 #include "bsp_systick.h"
@@ -32,11 +26,13 @@ extern void Error_Handler(void);
  * ================================================================ */
 
 /**
- * @brief  初始化系统时钟 + 使 SysTick 延时就绪
+ * @brief  初始化系统时钟 + 配置 SysTick (计数器启用, 中断关闭)
  *
- * @note   系统时钟配置（原 SystemClock_Config）已内聚于此。
- *         HAL_Init() 在调用本函数之前已将 SysTick 配置为 1ms 中断模式，
- *         本函数仅需确保系统时钟切换到 HSE+PLL 72MHz。
+ * @note   系统时钟切换至 HSE+PLL 72MHz, SysTick 配置为 1ms 时基.
+ *         HAL_Init / HAL_RCC_ClockConfig 内部不再调用 HAL_InitTick,
+ *         此处直接写 SysTick 寄存器, 不经过 SysTick_Config (它强制开中断).
+ *
+ *         裸机使用时取消注释 SysTick->CTRL |= TICKINT 行.
  */
 void BSP_SYSTICK_DelayInit(void)
 {
@@ -70,18 +66,23 @@ void BSP_SYSTICK_DelayInit(void)
         Error_Handler();
     }
 
-    /* HAL_RCC_ClockConfig 内部已调用 SystemCoreClockUpdate(),
-     * 此后 SystemCoreClock = 72000000。
-     * SysTick 仍在 HAL_Init() 配置的 1ms 中断模式下运行，
-     * 唯重装值需随新频率更新 —— HAL_RCC_ClockConfig 已自动处理。
+    /* ---- SysTick 手动配置 (1ms 时基, 计数器启动, 中断关闭) ----
+     * 不用 HAL_SYSTICK_Config → SysTick_Config, 因为它强制开 TICKINT.
+     * FreeRTOS 的 xPortStartScheduler 会在调度器启动时接管中断.
+     * 裸机: 取消注释下一行启用中断 → HAL_IncTick / HAL_Delay 恢复.
      */
+    SysTick->LOAD = SystemCoreClock / 1000U - 1U;          /* 72MHz → 71999 */
+    SysTick->VAL  = 0U;
+    // SysTick->CTRL |= SysTick_CTRL_TICKINT_Msk;           /* 裸机取消注释可激活HAL_Gettick */
+    SysTick->CTRL  = SysTick_CTRL_CLKSOURCE_Msk             /* CPU 时钟  */
+                   | SysTick_CTRL_ENABLE_Msk;              /* 启动计数器 */
 }
 
 /* ----------------------------------------------------------------
  * us 延时 — SysTick->VAL 轮询
  *
  * SysTick 为 24 位递减计数器，每个 SystemCoreClock 周期 -1。
- * HAL 配置: LOAD = SystemCoreClock/1000 - 1，自动重载，约 1ms 回绕一次。
+ * LOAD = 71999, 约 1ms 回绕一次。
  *
  * 实现要点:
  *   - 通过 (last - now) 处理递减差值
@@ -92,9 +93,9 @@ void BSP_SYSTICK_DelayInit(void)
 
 void BSP_SYSTICK_DelayUS(uint32_t us)
 {
-    uint32_t reload  = SysTick->LOAD;                     /* HAL 1ms 重装值    */
-    uint32_t ticks   = us * (SystemCoreClock / 1000000U); /* 目标 CPU 周期数   */
-    uint32_t last    = SysTick->VAL;                      /* 起始计数值        */
+    uint32_t reload  = SysTick->LOAD;                     /* 1ms 重装值      */
+    uint32_t ticks   = us * (SystemCoreClock / 1000000U); /* 目标 CPU 周期数 */
+    uint32_t last    = SysTick->VAL;                      /* 起始计数值      */
     uint32_t elapsed = 0;
 
     while (elapsed < ticks) {
@@ -113,17 +114,15 @@ void BSP_SYSTICK_DelayUS(uint32_t us)
 }
 
 /* ----------------------------------------------------------------
- * ms 延时 — HAL_GetTick 轮询
+ * ms 延时 — BSP_SYSTICK_DelayUS 循环包装
  *
- * HAL_GetTick() 返回自启动以来的毫秒数（由 SysTick 中断驱动）。
- * uwTick 为 32-bit 无符号数，差值减法自动处理溢出回绕。
+ * 不依赖 HAL_GetTick / HAL_IncTick → 不依赖 SysTick 中断.
+ * 每次调用 DelayUS(1000) 误差 < 5μs, 循环 ms 次累积可忽略.
  * ---------------------------------------------------------------- */
 
 void BSP_SYSTICK_DelayMS(uint32_t ms)
 {
-    uint32_t tickstart = HAL_GetTick();
-
-    while ((HAL_GetTick() - tickstart) < ms) {
-        /* spin */
+    while (ms--) {
+        BSP_SYSTICK_DelayUS(1000);
     }
 }

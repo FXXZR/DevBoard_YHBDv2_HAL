@@ -941,8 +941,8 @@ if (((RCC_ClkInitStruct->ClockType) & RCC_CLOCKTYPE_PCLK1) == RCC_CLOCKTYPE_PCLK
   /* Update the SystemCoreClock global variable */
   SystemCoreClock = HAL_RCC_GetSysClockFreq() >> AHBPrescTable[(RCC->CFGR & RCC_CFGR_HPRE) >> RCC_CFGR_HPRE_Pos];
 
-  /* Configure the source of time base considering new system clocks settings*/
-  HAL_InitTick(uwTickPrio);
+  /* SysTick 配置移至 BSP_SYSTICK_DelayInit, 此处不再调用 */
+  /* HAL_InitTick(uwTickPrio); */
 
   return HAL_OK;
 }

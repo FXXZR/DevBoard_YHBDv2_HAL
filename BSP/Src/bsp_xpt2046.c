@@ -9,30 +9,40 @@
 #include "bsp_xpt2046.h"
 #include "bsp_lcd_ili9341.h"
 #include "bsp_fonts.h"
+#include "bsp_systick.h"
 #include <stdio.h>
 #include <string.h>
 #include "stm32f1xx_hal.h"
 
+/* 本地延时封装 — 换平台只需改此两行 */
+static inline void delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
+static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
+
 /* ================================================================
- * 引脚定义 (硬件地址 = 允许用 #define)
+ * 硬件映射表
  * ================================================================ */
 
-/* ---- 软件 SPI ---- */
-#define XPT_CLK_PORT    GPIOG
-#define XPT_CLK_PIN     GPIO_PIN_7
+typedef struct {
+    /* 软件 SPI */
+    GPIO_TypeDef  *clk_port;   uint16_t clk_pin;
+    GPIO_TypeDef  *mosi_port;  uint16_t mosi_pin;
+    GPIO_TypeDef  *miso_port;  uint16_t miso_pin;
+    GPIO_TypeDef  *cs_port;    uint16_t cs_pin;
+    /* 触摸中断 (EXTI) */
+    GPIO_TypeDef  *irq_port;   uint16_t irq_pin;
+    IRQn_Type      irq_n;
+    uint8_t        irq_prio;      /* NVIC 优先级 */
+} XPT2046_HW_Map_t;
 
-#define XPT_MOSI_PORT   GPIOF
-#define XPT_MOSI_PIN    GPIO_PIN_11
-
-#define XPT_MISO_PORT   GPIOF
-#define XPT_MISO_PIN    GPIO_PIN_6
-
-#define XPT_CS_PORT     GPIOF
-#define XPT_CS_PIN      GPIO_PIN_10
-
-/* ---- 触摸中断 ---- */
-#define XPT_IRQ_PORT    GPIOF
-#define XPT_IRQ_PIN     GPIO_PIN_9
+static const XPT2046_HW_Map_t xpt_hw = {
+    .clk_port  = GPIOG, .clk_pin  = GPIO_PIN_7,
+    .mosi_port = GPIOF, .mosi_pin = GPIO_PIN_11,
+    .miso_port = GPIOF, .miso_pin = GPIO_PIN_6,
+    .cs_port   = GPIOF, .cs_pin   = GPIO_PIN_10,
+    .irq_port  = GPIOF, .irq_pin  = GPIO_PIN_9,
+    .irq_n     = EXTI9_5_IRQn,
+    .irq_prio  = 7,
+};
 
 /* ================================================================
  * 全局状态
@@ -70,30 +80,30 @@ static uint16_t xpt_spi_read_adc(uint8_t channel)
     uint8_t  i;
     uint16_t buf = 0, temp;
 
-    HAL_GPIO_WritePin(XPT_CS_PORT, XPT_CS_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(xpt_hw.cs_port, xpt_hw.cs_pin, GPIO_PIN_RESET);
 
     /* 写 8 位命令 (5μs 半周期 ≈ 100KHz) */
-    HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(xpt_hw.clk_port, xpt_hw.clk_pin, GPIO_PIN_RESET);
     for (i = 0; i < 8; i++) {
-        HAL_GPIO_WritePin(XPT_MOSI_PORT, XPT_MOSI_PIN,
+        HAL_GPIO_WritePin(xpt_hw.mosi_port, xpt_hw.mosi_pin,
                           (channel >> (7 - i)) & 0x01 ? GPIO_PIN_SET : GPIO_PIN_RESET);
         xpt_spi_delay(5);
-        HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(xpt_hw.clk_port, xpt_hw.clk_pin, GPIO_PIN_SET);
         xpt_spi_delay(5);
-        HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(xpt_hw.clk_port, xpt_hw.clk_pin, GPIO_PIN_RESET);
     }
 
     /* 读 12 位 (CLK 低时采样, 然后拉高 — 匹配 XPT2046 输出时序) */
     for (i = 0; i < 12; i++) {
-        HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_RESET);
+        HAL_GPIO_WritePin(xpt_hw.clk_port, xpt_hw.clk_pin, GPIO_PIN_RESET);
         xpt_spi_delay(1);
-        temp = HAL_GPIO_ReadPin(XPT_MISO_PORT, XPT_MISO_PIN);
+        temp = HAL_GPIO_ReadPin(xpt_hw.miso_port, xpt_hw.miso_pin);
         buf |= (temp << (11 - i));
-        HAL_GPIO_WritePin(XPT_CLK_PORT, XPT_CLK_PIN, GPIO_PIN_SET);
+        HAL_GPIO_WritePin(xpt_hw.clk_port, xpt_hw.clk_pin, GPIO_PIN_SET);
         xpt_spi_delay(1);
     }
 
-    HAL_GPIO_WritePin(XPT_CS_PORT, XPT_CS_PIN, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(xpt_hw.cs_port, xpt_hw.cs_pin, GPIO_PIN_SET);
 
     return buf;
 }
@@ -115,14 +125,14 @@ static void xpt_init_exti(void)
     __HAL_RCC_GPIOF_CLK_ENABLE();
 
     GPIO_InitTypeDef gpio = {0};
-    gpio.Pin   = XPT_IRQ_PIN;
+    gpio.Pin   = xpt_hw.irq_pin;
     gpio.Mode  = GPIO_MODE_IT_FALLING;
     gpio.Pull  = GPIO_PULLUP;
-    HAL_GPIO_Init(XPT_IRQ_PORT, &gpio);
+    HAL_GPIO_Init(xpt_hw.irq_port, &gpio);
 
     /* 使能并设置 EXTI 中断优先级 */
-    HAL_NVIC_SetPriority(EXTI9_5_IRQn, 1, 0);
-    HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+    HAL_NVIC_SetPriority(xpt_hw.irq_n, xpt_hw.irq_prio, 0);
+    HAL_NVIC_EnableIRQ(xpt_hw.irq_n);
 }
 
 /* ================================================================
@@ -137,27 +147,27 @@ static void xpt_init_gpio_spi(void)
     GPIO_InitTypeDef gpio = {0};
 
     /* CLK (PG7) — 推挽输出 */
-    gpio.Pin   = XPT_CLK_PIN;
+    gpio.Pin   = xpt_hw.clk_pin;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Speed = GPIO_SPEED_FREQ_HIGH;
-    HAL_GPIO_Init(XPT_CLK_PORT, &gpio);
+    HAL_GPIO_Init(xpt_hw.clk_port, &gpio);
 
     /* MOSI (PF11) — 推挽输出 */
-    gpio.Pin   = XPT_MOSI_PIN;
-    HAL_GPIO_Init(XPT_MOSI_PORT, &gpio);
+    gpio.Pin   = xpt_hw.mosi_pin;
+    HAL_GPIO_Init(xpt_hw.mosi_port, &gpio);
 
     /* MISO (PF6) — 输入上拉 */
-    gpio.Pin   = XPT_MISO_PIN;
+    gpio.Pin   = xpt_hw.miso_pin;
     gpio.Mode  = GPIO_MODE_INPUT;
     gpio.Pull  = GPIO_PULLUP;
-    HAL_GPIO_Init(XPT_MISO_PORT, &gpio);
+    HAL_GPIO_Init(xpt_hw.miso_port, &gpio);
 
     /* CS (PF10) — 推挽输出, 初始高 (失能) */
-    gpio.Pin   = XPT_CS_PIN;
+    gpio.Pin   = xpt_hw.cs_pin;
     gpio.Mode  = GPIO_MODE_OUTPUT_PP;
     gpio.Pull  = GPIO_PULLUP;
-    HAL_GPIO_Init(XPT_CS_PORT, &gpio);
-    HAL_GPIO_WritePin(XPT_CS_PORT, XPT_CS_PIN, GPIO_PIN_SET);
+    HAL_GPIO_Init(xpt_hw.cs_port, &gpio);
+    HAL_GPIO_WritePin(xpt_hw.cs_port, xpt_hw.cs_pin, GPIO_PIN_SET);
 }
 
 /* ================================================================
@@ -177,11 +187,11 @@ static uint8_t xpt_read_adc_smooth_xy(BSP_XPT2046_Coordinate_t *coord)
         buf_x[cnt] = ad_x;
         buf_y[cnt] = ad_y;
         cnt++;
-    } while ((HAL_GPIO_ReadPin(XPT_IRQ_PORT, XPT_IRQ_PIN) == GPIO_PIN_RESET)
+    } while ((HAL_GPIO_ReadPin(xpt_hw.irq_port, xpt_hw.irq_pin) == GPIO_PIN_RESET)
              && (cnt < 10));
 
     /* 触摸已松开则清除标志 */
-    if (HAL_GPIO_ReadPin(XPT_IRQ_PORT, XPT_IRQ_PIN) != GPIO_PIN_RESET) {
+    if (HAL_GPIO_ReadPin(xpt_hw.irq_port, xpt_hw.irq_pin) != GPIO_PIN_RESET) {
         BSP_XPT2046_TouchFlag = 0;
     }
 
@@ -302,18 +312,20 @@ uint8_t BSP_XPT2046_TouchCalibrate(void)
         /* 绘制十字参考点 */
         xpt_draw_cross(display_pts[i].x, display_pts[i].y);
 
-        HAL_Delay(200);
+        delay_ms(200);
 
-        /* 等待触摸采样 */
+        /* 等待触摸采样 (10s 超时, 100μs 轮询) */
         BSP_XPT2046_Coordinate_t sample;
         uint8_t valid = 0;
-        uint32_t timeout = HAL_GetTick() + 10000;  /* 10s 超时 */
+        uint32_t elapsed_us = 0;
 
-        while (HAL_GetTick() < timeout) {
+        while (elapsed_us < 10000000U) {
             if (BSP_XPT2046_TouchFlag) {
                 valid = xpt_read_adc_smooth_xy(&sample);
                 if (valid) break;
             }
+            delay_us(100);
+            elapsed_us += 100;
         }
 
         if (!valid) goto fail;
@@ -345,7 +357,7 @@ uint8_t BSP_XPT2046_TouchCalibrate(void)
     BSP_LCD_DrawString((sw - strlen("Calibrate OK") * 8) >> 1, sh >> 1,
                        "Calibrate OK", &Font8x16,
                        BSP_LCD_COLOR_GREEN, BSP_LCD_COLOR_BLACK);
-    HAL_Delay(1500);
+    delay_ms(1500);
 
     return 1;
 
@@ -354,7 +366,7 @@ fail:
     BSP_LCD_DrawString((sw - strlen("Calibrate FAIL") * 8) >> 1, sh >> 1,
                        "Calibrate FAIL", &Font8x16,
                        BSP_LCD_COLOR_RED, BSP_LCD_COLOR_BLACK);
-    HAL_Delay(1500);
+    delay_ms(1500);
     return 0;
 }
 
@@ -389,8 +401,8 @@ uint8_t BSP_XPT2046_GetTouchPoint(BSP_XPT2046_Coordinate_t *pCoord,
 
 void BSP_XPT2046_EXTI_Callback(void)
 {
-    if (__HAL_GPIO_EXTI_GET_IT(XPT_IRQ_PIN) != 0x00u) {
-        __HAL_GPIO_EXTI_CLEAR_IT(XPT_IRQ_PIN);
+    if (__HAL_GPIO_EXTI_GET_IT(xpt_hw.irq_pin) != 0x00u) {
+        __HAL_GPIO_EXTI_CLEAR_IT(xpt_hw.irq_pin);
         BSP_XPT2046_TouchFlag = 1;
     }
 }
@@ -401,8 +413,8 @@ void BSP_XPT2046_EXTI_Callback(void)
 
 void EXTI9_5_IRQHandler(void)
 {
-    if (__HAL_GPIO_EXTI_GET_IT(XPT_IRQ_PIN) != 0x00u) {
-        __HAL_GPIO_EXTI_CLEAR_IT(XPT_IRQ_PIN);
+    if (__HAL_GPIO_EXTI_GET_IT(xpt_hw.irq_pin) != 0x00u) {
+        __HAL_GPIO_EXTI_CLEAR_IT(xpt_hw.irq_pin);
         BSP_XPT2046_TouchFlag = 1;
     }
 }

@@ -51,10 +51,11 @@ void HardFault_Handler(void);
 void MemManage_Handler(void);
 void BusFault_Handler(void);
 void UsageFault_Handler(void);
-void SVC_Handler(void);
 void DebugMon_Handler(void);
-void PendSV_Handler(void);
-void SysTick_Handler(void);
+/* FreeRTOS 已接管: SVC/PendSV/SysTick (port.c 通过 FreeRTOSConfig.h 宏映射) */
+/* void SVC_Handler(void);      */
+/* void PendSV_Handler(void);   */
+/* void SysTick_Handler(void);  */
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

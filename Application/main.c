@@ -23,7 +23,9 @@
 #include "bsp_systick.h"
 #include "bsp_led.h"
 #include "bsp_usart.h"
-#include "test.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "task_init.h"
 
 
 /* Private function prototypes -----------------------------------------------*/
@@ -35,8 +37,8 @@ void Error_Handler(void);
 int main(void) {
 
     /* ---- 硬件抽象层 + 系统时钟 ---- */
-    HAL_Init();
-    BSP_SYSTICK_DelayInit();
+    HAL_Init();                    /* NVIC 分组, 不碰 SysTick */
+    BSP_SYSTICK_DelayInit();       /* 时钟 PLL 72MHz, SysTick 计数器启动/中断关闭 */
 
     /* ---- BSP 外设驱动初始化 ---- */
     BSP_LED_Init();
@@ -45,45 +47,23 @@ int main(void) {
     /* ---- 启动 Banner ---- */
     printf("\r\n========================================\r\n");
     printf("  HAL_TEST_Board — STM32F103ZET6\r\n");
-    printf("  BSP: LED | USART | BEEP | KEY | ADC | RTC | FSMC\r\n");
     printf("========================================\r\n\r\n");
 
+    /* ---- 启动前心跳: RGB 三色依次亮灭 ---- */
+    BSP_LED_On(BSP_LED_R);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_R);
+    BSP_LED_On(BSP_LED_G);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_G);
+    BSP_LED_On(BSP_LED_B);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_B);
+
     /* ================================================================
-     * 测试入口：取消注释要运行的测试，其他保持注释
+     * FreeRTOS 启动
      * ================================================================ */
-    // Test_BEEP_KeyTrigger();   /* KEY1 按下 → 蜂鸣 200ms */
-    // Test_KEY_Scan();          /* KEY1/2 → LED + printf 状态 */
-    // Test_ADC_Continuous();    /* PC1 电压每 500ms printf */
-    // Test_EEPROM_ReadWrite();   /* AT24C02 全片写入 + 读出校验 */
-    // Test_SPI_FLASH_ReadWrite(); /* W25Q64 全片写入 + 读出校验 */
+    printf("[RTOS] Starting scheduler...\r\n");
+    task_init();                    /* 创建启动任务 (内部批量创建子任务) */
+    vTaskStartScheduler();          /* 启动调度器 (永不返回) */
 
-    // Test_SDCARD_FatFS();        /* SD Card + FatFS 读写验证 */
-
-    // Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
-    // Test_RS485_Passthrough();    /* RS485 ↔ USART1 透传测试 */
-    // Test_ESP8266_Passthrough();   /* ESP8266 透传测试 */
-    // Test_DMA_Echo();              /* USART1 DMA 收发回显测试 */
-    // Test_SRAM_ReadWrite();        /* 外部 SRAM 读写验证 (FSMC Bank3) */
-    Test_LCD_Display();             /* LCD + 触摸综合显示测试 (FSMC Bank4) */
-    /* ---- 不会执行到这里 (测试函数内部有死循环) ---- */
-    while (1) {
-        /* 回退: LED 交替闪烁 + USART1 回显 */
-        if(HAL_GetTick() % 1000 < 500) {
-            BSP_LED_On(BSP_LED_R);
-            BSP_LED_Off(BSP_LED_G);
-            BSP_LED_Off(BSP_LED_B);
-        } else {
-            BSP_LED_Off(BSP_LED_R);
-            BSP_LED_On(BSP_LED_G);
-            BSP_LED_On(BSP_LED_B);
-        }
-
-        uint8_t ch;
-        if(BSP_USART_Read(BSP_USART1, &ch) == 0) {
-            BSP_USART_Send(BSP_USART1, &ch, 1);
-            BSP_USART_Flush(BSP_USART1, 10);
-        }
-    }
+    /* ---- 不应到达此处 (调度器启动失败才会到达) ---- */
+    printf("[RTOS] FATAL: Scheduler returned!\r\n");
+    Error_Handler();
 }
 
 
@@ -95,6 +75,9 @@ int main(void) {
 void Error_Handler(void) {
     __disable_irq();
     while (1) {
+        /* Red LED SOS — 用空循环粗略延时 (IRQ 已关, HAL_Delay 不可用) */
+        for (volatile uint32_t i = 0; i < 2000000; i++) { __NOP(); }
+        BSP_LED_Toggle(BSP_LED_R);
     }
 }
 

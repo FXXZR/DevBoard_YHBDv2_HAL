@@ -156,8 +156,8 @@ HAL_StatusTypeDef HAL_Init(void)
   /* Set Interrupt Group Priority */
   HAL_NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);
 
-  /* Use systick as time base source and configure 1ms tick (default clock after Reset is HSI) */
-  HAL_InitTick(TICK_INT_PRIORITY);
+  /* SysTick 交由 BSP (裸机) 或 FreeRTOS 管理, HAL_Init 不再启动 */
+  /* HAL_InitTick(TICK_INT_PRIORITY); */
 
   /* Init the low level hardware */
   HAL_MspInit();
