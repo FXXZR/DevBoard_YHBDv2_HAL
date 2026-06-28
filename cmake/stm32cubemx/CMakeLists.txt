@@ -68,6 +68,12 @@ set(STM32_Drivers_Src
 
     # ---- LL SDMMC (配合 SD 模块使用) ----
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_ll_sdmmc.c
+
+    # ---- SRAM (启用 HAL_SRAM_MODULE_ENABLED 后取消注释) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_hal_sram.c
+
+    # ---- LL FSMC (配合 SRAM 模块使用) ----
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Drivers/STM32F1xx_HAL_Driver/Src/stm32f1xx_ll_fsmc.c
 )
 
 # 注意: 以下 HAL 模块源文件按需启用。

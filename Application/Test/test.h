@@ -27,6 +27,10 @@
 #include "bsp_sdcard.h"
 #include "bsp_rs485.h"
 #include "bsp_esp8266.h"
+#include "bsp_sram.h"
+#include "bsp_fonts.h"
+#include "bsp_lcd_ili9341.h"
+#include "bsp_xpt2046.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -112,6 +116,20 @@ void Test_ESP8266_Passthrough(void);
  *         帧长 >256B 时分段回显 (先发 128B, IDLE 后发剩余).
  */
 void Test_DMA_Echo(void);
+
+/**
+ * @brief  外部 SRAM 读写测试
+ * @note   通过 FSMC Bank3 内存映射直接读写 SRAM (IS62WV51216, 1MB).
+ *         测试 8 位和 16 位两种访问方式, 打印 PASS/FAIL.
+ */
+void Test_SRAM_ReadWrite(void);
+
+/**
+ * @brief  LCD + 触摸综合显示测试
+ * @note   测试流程: 颜色条 → 几何图形(线/矩形/圆) → 字体(3套) → 触摸画板.
+ *         触摸画板中按 KEY1 退出.
+ */
+void Test_LCD_Display(void);
 
 #ifdef __cplusplus
 }

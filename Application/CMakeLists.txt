@@ -29,6 +29,8 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_rs485.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_esp8266.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_dma_echo.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_sram.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_lcd.c
 
     # 后续新增应用模块在这里添加，例如:
     # ${CMAKE_CURRENT_SOURCE_DIR}/Common/app_data_model.c

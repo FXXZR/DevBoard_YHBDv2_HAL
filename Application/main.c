@@ -45,7 +45,7 @@ int main(void) {
     /* ---- 启动 Banner ---- */
     printf("\r\n========================================\r\n");
     printf("  HAL_TEST_Board — STM32F103ZET6\r\n");
-    printf("  BSP: LED | USART | BEEP | KEY | ADC | RTC\r\n");
+    printf("  BSP: LED | USART | BEEP | KEY | ADC | RTC | FSMC\r\n");
     printf("========================================\r\n\r\n");
 
     /* ================================================================
@@ -62,7 +62,9 @@ int main(void) {
     // Test_RTC_Interactive();      /* RTC 时间戳 + 串口命令交互 */
     // Test_RS485_Passthrough();    /* RS485 ↔ USART1 透传测试 */
     // Test_ESP8266_Passthrough();   /* ESP8266 透传测试 */
-    Test_DMA_Echo();              /* USART1 DMA 收发回显测试 */
+    // Test_DMA_Echo();              /* USART1 DMA 收发回显测试 */
+    // Test_SRAM_ReadWrite();        /* 外部 SRAM 读写验证 (FSMC Bank3) */
+    Test_LCD_Display();             /* LCD + 触摸综合显示测试 (FSMC Bank4) */
     /* ---- 不会执行到这里 (测试函数内部有死循环) ---- */
     while (1) {
         /* 回退: LED 交替闪烁 + USART1 回显 */

@@ -31,6 +31,10 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sdcard.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_rs485.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_esp8266.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sram.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_fonts.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_lcd_ili9341.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_xpt2046.c
 )
 
 # BSP 对外暴露的头文件路径（应用层需要 #include "bsp_xxx.h"）

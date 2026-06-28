@@ -38,7 +38,6 @@ static void on_rs485_rx(BSP_USART_Id_t id)
     if (len > BUF_SIZE) len = BUF_SIZE;
     len = BSP_RS485_ReadBytes(fwd_buf, len);
     if (len > 0) {
-        BSP_USART_Flush(BSP_USART1, 100);
         BSP_USART_Send(BSP_USART1, fwd_buf, len);
     }
 }
