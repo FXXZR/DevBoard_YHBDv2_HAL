@@ -23,6 +23,8 @@
 #include "bsp_adc.h"
 #include "bsp_rtc.h"
 #include "bsp_eeprom.h"
+#include "bsp_mpu6050.h"
+#include "bsp_ap3216c.h"
 #include "bsp_spi_flash.h"
 #include "bsp_sdcard.h"
 #include "bsp_rs485.h"
@@ -130,6 +132,22 @@ void Test_SRAM_ReadWrite(void);
  *         触摸画板中按 KEY1 退出.
  */
 void Test_LCD_Display(void);
+
+/**
+ * @brief  MPU6050 6轴运动传感器连续读取测试
+ * @note   通过 I2C (默认软件 I2C, PB6=SCL, PB7=SDA, 400KHz) 操作 MPU6050。
+ *         每 500ms 读取一次并 printf 加速度(g)、角速度(°/s)、温度(°C)。
+ *         静止状态下加速度 Z ≈ +1.0g, 角速度 ≈ 0°/s。
+ */
+void Test_MPU6050_Read(void);
+
+/**
+ * @brief  AP3216C 环境光/接近/红外传感器连续读取测试
+ * @note   通过 I2C (默认软件 I2C, PB6=SCL, PB7=SDA, 400KHz) 操作 AP3216C。
+ *         每 500ms 读取一次并 printf ALS(lux)、PS(0~1023)、IR。
+ *         初版纯轮询模式，不使用 INT 引脚 (PF8)。
+ */
+void Test_AP3216C_Read(void);
 
 #ifdef __cplusplus
 }

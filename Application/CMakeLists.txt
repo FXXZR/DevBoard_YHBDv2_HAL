@@ -31,6 +31,8 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_dma_echo.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_sram.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_lcd.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_mpu6050.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Test/test_ap3216c.c
 
     # FreeRTOS 移植钩子 (HAL 桥接)
     ${CMAKE_CURRENT_SOURCE_DIR}/Common/rtos_port_hooks.c

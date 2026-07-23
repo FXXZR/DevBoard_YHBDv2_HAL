@@ -26,6 +26,8 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_i2c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_soft_i2c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_eeprom.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_mpu6050.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_ap3216c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi_flash.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sdcard.c

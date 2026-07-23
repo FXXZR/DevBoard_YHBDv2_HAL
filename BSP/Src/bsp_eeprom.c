@@ -47,7 +47,7 @@
  * 内部常量
  * ================================================================ */
 
-static const uint32_t kI2cSpeed        = 100000;   /* 100KHz */
+static const uint32_t kI2cSpeed        = 400000;   /* 400KHz (shared bus with MPU6050/AP3216C) */
 static const uint32_t kWriteWaitPolls  = 50;       /* 写周期轮询次数 */
 static const uint32_t kPollLoopCycles  = 2000;     /* 轮询间隔 (~200us @72MHz -O0) */
 

@@ -98,3 +98,12 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+# Debug: 启用 printf/scanf 浮点格式化 (newlib-nano 默认关闭, 约 +15KB FLASH)
+# Release: 不启用 — 正式固件通常关闭 printf 或只用整数格式
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+        -Wl,-u,_printf_float
+        -Wl,-u,_scanf_float
+    )
+endif()
