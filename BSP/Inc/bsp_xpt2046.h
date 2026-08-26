@@ -76,6 +76,14 @@ uint8_t BSP_XPT2046_GetTouchPoint(BSP_XPT2046_Coordinate_t *pCoord,
                                    const BSP_XPT2046_TouchPara_t *pPara);
 
 /**
+ * @brief  查询触摸是否被按住 (电平检测, 非边沿)
+ * @return 1=按住, 0=松开
+ * @note   直接读 IRQ 引脚电平 (PF9, 低电平有效)。
+ *         用于轮询场景 (如 LVGL read_cb) 在 TouchFlag 边沿之外维持按住状态。
+ */
+uint8_t BSP_XPT2046_IsPressed(void);
+
+/**
  * @brief  外部中断回调 (在 stm32f1xx_it.c 的 EXTI9_5_IRQHandler 中调用)
  */
 void BSP_XPT2046_EXTI_Callback(void);

@@ -5,6 +5,7 @@
 #include "task_init.h"
 #include "task_led.h"
 #include "task_test.h"
+#include "task_disp.h"
 #include <stddef.h>   /* NULL */
 
 /* ================================================================
@@ -26,10 +27,21 @@ static const TaskDef_t task_list[] = {
         .p_handle    = NULL,
         .pv_params   = NULL,
     },
+    /* 暂时屏蔽: 与 LVGL disp 任务争抢 LCD 控制权 (验证显示时先注释) */
+    /*
     {
         .name        = "test",
         .func        = vTestTask,
-        .stack_depth = 1024,           /* LCD + Touch + printf 需要大栈 */
+        .stack_depth = 1024,
+        .priority    = 1,
+        .p_handle    = NULL,
+        .pv_params   = NULL,
+    },
+    */
+    {
+        .name        = "disp",
+        .func        = vDispTask,
+        .stack_depth = 1024,           /* LVGL 渲染需要较大栈 */
         .priority    = 1,
         .p_handle    = NULL,
         .pv_params   = NULL,

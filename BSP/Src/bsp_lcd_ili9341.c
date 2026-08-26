@@ -740,3 +740,21 @@ void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *fo
         cur_x += font->Width;
     }
 }
+
+void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         const uint16_t *data)
+{
+    uint32_t total = (uint32_t)w * h;
+    uint32_t i;
+
+    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return;
+    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
+    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+
+    lcd_open_window(x, y, w, h);
+    lcd_write_cmd(0x2C);
+
+    for (i = 0; i < total; i++) {
+        lcd_write_data(data[i]);
+    }
+}

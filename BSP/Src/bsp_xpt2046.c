@@ -399,6 +399,11 @@ uint8_t BSP_XPT2046_GetTouchPoint(BSP_XPT2046_Coordinate_t *pCoord,
     return 0;
 }
 
+uint8_t BSP_XPT2046_IsPressed(void)
+{
+    return (HAL_GPIO_ReadPin(xpt_hw.irq_port, xpt_hw.irq_pin) == GPIO_PIN_RESET) ? 1 : 0;
+}
+
 void BSP_XPT2046_EXTI_Callback(void)
 {
     if (__HAL_GPIO_EXTI_GET_IT(xpt_hw.irq_pin) != 0x00u) {

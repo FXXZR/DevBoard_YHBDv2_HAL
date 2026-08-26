@@ -25,4 +25,4 @@ add_subdirectory(lvgl-8.3.11)
 # STATIC 确保 OBJECT 的 .o 被正确传播到最终可执行文件
 # (INTERFACE 库无法可靠传递 OBJECT 库的目标文件)
 add_library(middleware STATIC)
-target_link_libraries(middleware PUBLIC fatfs freertos)
+target_link_libraries(middleware PUBLIC fatfs freertos lvgl)

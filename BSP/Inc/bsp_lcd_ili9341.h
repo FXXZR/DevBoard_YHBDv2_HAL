@@ -168,6 +168,17 @@ void BSP_LCD_DrawChar(uint16_t x, uint16_t y, char ch, const sFONT *font,
 void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *font,
                         uint16_t fg_color, uint16_t bg_color);
 
+/**
+ * @brief  批量写入像素数据 (GRAM 窗口)
+ * @param  x,y   左上角坐标
+ * @param  w,h   宽/高 (像素)
+ * @param  data  像素数据缓冲区 (RGB565, 共 w*h 个)
+ * @note   用于 LVGL 等上层库的 flush 回调 — 先开窗再连续写数据, 比逐点快得多
+ */
+void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         const uint16_t *data);
+
+                        
 #ifdef __cplusplus
 }
 #endif
