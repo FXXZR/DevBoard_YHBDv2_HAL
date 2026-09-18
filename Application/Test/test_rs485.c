@@ -48,12 +48,17 @@ static void on_rs485_rx(BSP_USART_Id_t id)
 void Test_RS485_Passthrough(void)
 {
     /* ---- USART1: 注册 IDLE 回调 ---- */
+    /* TX 环形缓冲现由调用者提供 (BSP_USART_InitEx 的必填项).
+     * 漏了不会报错, 但该路会变成"能收不能发" —— 透传测试会静默失效. */
+    static uint8_t usart1_tx_buf[256];
     BSP_USART_Config_t usart1_cfg = {
         .baudrate         = BAUD,
         .word_length      = BSP_USART_WORD_8B,
         .stop_bits        = BSP_USART_STOP_1,
         .parity           = BSP_USART_PARITY_NONE,
         .rx_idle_callback = on_usart1_rx,
+        .tx_buf           = usart1_tx_buf,
+        .tx_buf_size      = sizeof(usart1_tx_buf),
     };
     BSP_USART_InitEx(BSP_USART1, &usart1_cfg);
 

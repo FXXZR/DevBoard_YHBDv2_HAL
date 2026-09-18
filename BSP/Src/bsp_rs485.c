@@ -30,6 +30,10 @@
 
 static volatile uint8_t rs485_initialized = 0;
 
+/* TX 环形缓冲 —— USART2 的使用者就是本模块, 所以由本模块提供.
+ * Modbus RTU 最大帧 256 字节, 开 256B 可整帧入队, 无需调用者续传 */
+static uint8_t rs485_tx_buf[256];
+
 /* ================================================================
  * TX 发送完成回调 (ISR 上下文)
  * ================================================================ */
@@ -96,6 +100,8 @@ void BSP_RS485_InitEx(const BSP_RS485_Config_t *config)
         .parity           = config->parity,
         .tx_cplt_callback = rs485_tx_cplt_cb,
         .rx_idle_callback = config->rx_idle_callback,
+        .tx_buf           = rs485_tx_buf,
+        .tx_buf_size      = sizeof(rs485_tx_buf),
     };
     BSP_USART_InitEx(RS485_USART_ID, &usart_cfg);
 
@@ -119,9 +125,13 @@ void BSP_RS485_DeInit(void)
  * ---------------------------------------------------------------- */
 
 /**
- * @brief  通过 RS485 发送数据 (中断方式, 非阻塞)
- * @note   发送前拉高 DE/RE, 发送完成后 ISR 回调自动拉低.
- *         若发送失败 (忙), 立即恢复接收模式.
+ * @brief  通过 RS485 发送数据 (环形缓冲 + DMA, 非阻塞)
+ * @return 实际入队的字节数; < len 表示缓冲空间不足, 剩余部分由调用者续传
+ * @note   发送前拉高 DE/RE, 环形彻底排空后由 ISR 回调自动拉低.
+ *
+ *         方向控制不能只看返回值: 环形缓冲满时 ret 可能为 0, 但那恰恰说明
+ *         还有数据在途 —— 此时拉低 DE 会把在途数据的尾部切掉.
+ *         所以用 TxIdle() 判断, 它同时覆盖「环形空」和「无在途传输」两个条件.
  */
 uint16_t BSP_RS485_Send(const uint8_t *data, uint16_t len)
 {
@@ -130,12 +140,13 @@ uint16_t BSP_RS485_Send(const uint8_t *data, uint16_t len)
     /* 进入发送模式 */
     HAL_GPIO_WritePin(RS485_DE_RE_PORT, RS485_DE_RE_PIN, GPIO_PIN_SET);
 
-    uint16_t ret = BSP_USART_Send(RS485_USART_ID, data, len);
-    if (ret == 0) {
-        /* 发送失败 (USART2 忙), 立即恢复接收模式 */
+    uint16_t ret = BSP_USART_Write(RS485_USART_ID, data, len);
+
+    if (BSP_USART_TxIdle(RS485_USART_ID)) {
+        /* 总线上确实什么都没有 —— 立即收回方向, 避免占着总线 */
         HAL_GPIO_WritePin(RS485_DE_RE_PORT, RS485_DE_RE_PIN, GPIO_PIN_RESET);
     }
-    /* 成功: TX 完成回调 rs485_tx_cplt_cb() 会切回接收模式 */
+    /* 否则: TX 空闲回调 rs485_tx_cplt_cb() 会在环形排空后切回接收模式 */
 
     return ret;
 }
@@ -156,6 +167,35 @@ int BSP_RS485_Flush(uint32_t timeout)
 {
     if (!rs485_initialized) return -1;
     return BSP_USART_Flush(RS485_USART_ID, timeout);
+}
+
+/**
+ * @brief  查询 RS485 发送缓冲还能入队多少字节
+ * @note   应用层通过本模块访问 USART2, 不直接调用 BSP_USART_* ——
+ *         否则会绕过本模块对串口的所有权约定 (DE 方向控制).
+ */
+uint16_t BSP_RS485_TxSpace(void)
+{
+    return BSP_USART_TxSpace(RS485_USART_ID);
+}
+
+/**
+ * @brief  查询 RS485 发送缓冲中尚未发出的字节数
+ */
+uint16_t BSP_RS485_TxPending(void)
+{
+    return BSP_USART_TxPending(RS485_USART_ID);
+}
+
+/**
+ * @brief  查询 RS485 发送是否完全空闲
+ * @return 1 = 空闲 (可安全发起下一帧), 0 = 仍有数据在途
+ * @note   Modbus RTU 是请求-应答式的, 从机应答完才轮到下一帧,
+ *         判断"上一帧是否真的发完"应该用这个而不是自己数时间.
+ */
+uint8_t BSP_RS485_TxIdle(void)
+{
+    return BSP_USART_TxIdle(RS485_USART_ID);
 }
 
 /* ----------------------------------------------------------------

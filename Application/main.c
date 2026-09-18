@@ -33,6 +33,13 @@
 void Error_Handler(void);
 
 /* ================================================================
+ * USART1 = 日志口
+ * 环形缓冲由调用者提供 —— 这里按日志口的真实用量给 512B, 不走内部默认的 256B.
+ * 大小必须是 2 的幂 (环形缓冲用掩码寻址, Cortex-M3 没有硬件除法).
+ * ================================================================ */
+static uint8_t s_log_tx_buf[512];
+
+/* ================================================================
  * 主函数
  * ================================================================ */
 int main(void) {
@@ -43,7 +50,19 @@ int main(void) {
 
     /* ---- BSP 外设驱动初始化 ---- */
     BSP_LED_Init();
-    BSP_USART_Init(BSP_USART1, 115200);
+
+    /* USART1 = 日志口: 环形缓冲 + DMA 发送, 入队即返回, 全程非阻塞
+     * (printf 重定向到本口, 走的就是这个环形缓冲) */
+    BSP_USART_Config_t log_uart_cfg = {
+        .baudrate    = 115200,
+        .word_length = BSP_USART_WORD_8B,
+        .stop_bits   = BSP_USART_STOP_1,
+        .parity      = BSP_USART_PARITY_NONE,
+        .use_dma_tx  = 1,
+        .tx_buf      = s_log_tx_buf,
+        .tx_buf_size = sizeof(s_log_tx_buf),
+    };
+    BSP_USART_InitEx(BSP_USART1, &log_uart_cfg);
 
     /* 外部 SRAM 初始化 — 必须在进入 RTOS 前完成
      * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪 */

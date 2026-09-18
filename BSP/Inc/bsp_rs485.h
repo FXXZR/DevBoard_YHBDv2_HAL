@@ -68,13 +68,14 @@ void BSP_RS485_DeInit(void);
  * ================================================================ */
 
 /**
- * @brief  通过 RS485 发送数据 (中断方式, 非阻塞)
- * @param  data 待发送数据指针 (调用后即可释放/复用)
+ * @brief  通过 RS485 发送数据 (环形缓冲, 非阻塞)
+ * @param  data 待发送数据指针 (入队后即可释放/复用)
  * @param  len  数据长度 (字节)
- * @return 成功入队的字节数, 0 = 缓冲区满/忙/未初始化
+ * @return 成功入队的字节数, 0 = 缓冲区满/未初始化
  * @note   发送前自动拉高 DE/RE (发送模式),
- *         发送完成后自动拉低 DE/RE (接收模式).
- *         返回 < len 说明内部缓冲区空间不足.
+ *         环形彻底排空后自动拉低 DE/RE (接收模式).
+ *         返回 < len 说明缓冲区空间不足 —— 剩余部分需调用者续传,
+ *         此时 DE 保持发送模式, 不会切掉在途数据的尾部.
  */
 uint16_t BSP_RS485_Send(const uint8_t *data, uint16_t len);
 
@@ -91,6 +92,22 @@ uint16_t BSP_RS485_SendString(const char *str);
  * @return 0 = 发送完成, -1 = 超时
  */
 int BSP_RS485_Flush(uint32_t timeout);
+
+/**
+ * @brief  查询 RS485 发送缓冲还能入队多少字节
+ */
+uint16_t BSP_RS485_TxSpace(void);
+
+/**
+ * @brief  查询 RS485 发送缓冲中尚未发出的字节数
+ */
+uint16_t BSP_RS485_TxPending(void);
+
+/**
+ * @brief  查询 RS485 发送是否完全空闲 (可安全发起下一帧)
+ * @return 1 = 空闲, 0 = 仍有数据在途
+ */
+uint8_t BSP_RS485_TxIdle(void);
 
 /* ================================================================
  * 接收

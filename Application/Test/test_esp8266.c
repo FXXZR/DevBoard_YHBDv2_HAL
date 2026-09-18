@@ -23,7 +23,20 @@ static uint8_t line_start = 1;
 static void esp_set_baudrate(uint32_t new_baud)
 {
     esp_baudrate = new_baud;
-    BSP_USART_Init(BSP_USART1, new_baud);
+
+    /* BSP_USART_Init (简化版) 已移除 —— TX 环形缓冲改为必填项, 没有缓冲区
+     * 可传的简化初始化不再成立. 这里给 USART1 配一块测试专用缓冲. */
+    static uint8_t uart1_tx_buf[256];
+    BSP_USART_Config_t cfg = {
+        .baudrate    = new_baud,
+        .word_length = BSP_USART_WORD_8B,
+        .stop_bits   = BSP_USART_STOP_1,
+        .parity      = BSP_USART_PARITY_NONE,
+        .tx_buf      = uart1_tx_buf,
+        .tx_buf_size = sizeof(uart1_tx_buf),
+    };
+    BSP_USART_InitEx(BSP_USART1, &cfg);
+
     BSP_ESP8266_Init(new_baud);
 }
 

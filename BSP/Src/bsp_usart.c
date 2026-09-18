@@ -4,7 +4,10 @@
  * @note    RX: HAL_UARTEx_ReceiveToIdle_IT / _DMA → 环形缓冲 (rx_count 累加)
  *              DMA_CIRCULAR: 永不停, 零间隙, 适合任意波特率
  *              IT: HAL 内部 RXNE ISR, IDLE/满时触发回调, 重装
- *          TX: IT 或 DMA 发送 (use_dma_tx 选择)
+ *          TX: 环形缓冲 + IT/DMA 分段续传 (use_dma_tx 选择)
+ *              写指针 tx_head 只在任务侧推进 (临界区保护, 支持多写者)
+ *              读指针 tx_tail 只在 ISR 侧推进 (无需保护)
+ *              DMA 是 NORMAL 模式, 跨缓冲末尾时只发到末尾, 完成中断里续下一段
  *          USART5 无 DMA; UART4_TX DMA 与 SDIO 共享 IRQ, 暂跳过 ISR 注册.
  */
 
@@ -22,7 +25,9 @@ static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
  * ================================================================ */
 
 #define USART_RX_BUF_SIZE  256U
-#define USART_TX_BUF_SIZE  256U
+
+/* 2 的幂判定 — 环形缓冲用掩码寻址, 必须是 2 的幂 */
+#define IS_POW2(n)         ((n) != 0U && (((n) & ((n) - 1U)) == 0U))
 
 /* ================================================================
  * 硬件映射表
@@ -101,10 +106,18 @@ typedef struct {
     volatile uint32_t   rx_lost;       /* 因应用读取不及时被覆盖丢弃的字节数，正常应为0，
                                         如果注册接收回调函数也基本不可能出现遗失 */
 
-    /* TX */
-    uint8_t             tx_buf[USART_TX_BUF_SIZE];
-    volatile uint8_t    tx_busy;
-    volatile uint8_t    tx_direct;
+    /* TX 环形缓冲
+     * tx_head / tx_tail 单调递增, 回绕交给 uint16 自然溢出;
+     * 入队位置 = tx_head & tx_mask, 已用量 = (uint16_t)(tx_head - tx_tail).
+     * 前提: tx_size <= 32768, 保证差值不会与"满"混淆 */
+    uint8_t            *tx_buf;         /* 调用者提供; NULL = 该路只收不发 */
+    uint16_t            tx_size;        /* 2 的幂 */
+    uint16_t            tx_mask;        /* tx_size - 1 */
+    volatile uint16_t   tx_head;        /* 写指针 — 只在任务侧推进 */
+    volatile uint16_t   tx_tail;        /* 读指针 — 只在 ISR 侧推进 */
+    uint16_t            tx_chunk;       /* 本次在途传输的字节数 */
+    volatile uint8_t    tx_active;      /* 1 = IT/DMA 正在传输 */
+    volatile uint8_t    tx_direct;      /* 1 = 在途的是调用者缓冲(零拷贝), 不推进 tail */
 
     /* 回调 */
     BSP_USART_TxCpltCallback_t   tx_cplt_cb;
@@ -158,6 +171,64 @@ static void usart_rx_rearm(USART_Ctx_t *ctx)
 }
 
 /* ================================================================
+ * 内部辅助 — TX 环形缓冲
+ *
+ * 临界区用 PRIMASK 而非 FreeRTOS 的 taskENTER_CRITICAL —— BSP 层不依赖 RTOS.
+ * 保护范围是「多字节 memcpy + 写指针推进 + 启动发送」, 1KB 最坏约 20us.
+ * 115200 下 UART 自身有约 174us 的收发缓冲 (移位寄存器 + 数据寄存器),
+ * 因此不会丢字节. 若以后波特率显著提高, 需要重新评估这个临界区长度.
+ * ================================================================ */
+
+static inline uint32_t usart_crit_enter(void)
+{
+    uint32_t primask = __get_PRIMASK();
+    __disable_irq();
+    return primask;
+}
+
+static inline void usart_crit_exit(uint32_t primask)
+{
+    if (!primask) __enable_irq();
+}
+
+/** @brief 环形缓冲中已入队未发出的字节数 */
+static inline uint16_t tx_used(const USART_Ctx_t *ctx)
+{
+    return (uint16_t)(ctx->tx_head - ctx->tx_tail);
+}
+
+/**
+ * @brief  若发送空闲且有数据, 启动下一段传输
+ * @note   可在任务上下文和 ISR 上下文调用.
+ *         只发送「从读指针到缓冲末尾」这一段连续数据 —— 跨末尾的部分
+ *         留给下一次调用, 这样 DMA 永远不必处理回绕.
+ */
+static void tx_kick(USART_Ctx_t *ctx)
+{
+    if (ctx->tx_active || !ctx->tx_buf) return;
+
+    uint16_t used = tx_used(ctx);
+    if (used == 0) return;
+
+    uint16_t idx    = (uint16_t)(ctx->tx_tail & ctx->tx_mask);
+    uint16_t to_end = (uint16_t)(ctx->tx_size - idx);
+    uint16_t len    = (used < to_end) ? used : to_end;
+
+    ctx->tx_chunk  = len;
+    ctx->tx_direct = 0;
+    ctx->tx_active = 1;
+
+    HAL_StatusTypeDef st = ctx->use_dma_tx
+        ? HAL_UART_Transmit_DMA(&ctx->huart, &ctx->tx_buf[idx], len)
+        : HAL_UART_Transmit_IT (&ctx->huart, &ctx->tx_buf[idx], len);
+
+    if (st != HAL_OK) {
+        /* 启动失败 (不应发生): 回滚状态, 数据留在缓冲里等下次 */
+        ctx->tx_active = 0;
+    }
+}
+
+/* ================================================================
  * HAL 回调
  * ================================================================ */
 
@@ -201,16 +272,38 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     USART_Ctx_t *ctx = ctx_from_huart(huart);
     if (!ctx) return;
 
+    /* 推进读指针 —— 只有 ISR 侧会改 tx_tail, 因此无需临界区 */
+    if (!ctx->tx_direct) {
+        ctx->tx_tail = (uint16_t)(ctx->tx_tail + ctx->tx_chunk);
+    }
     ctx->tx_direct = 0;
-    ctx->tx_busy   = 0;
+    ctx->tx_active = 0;
 
-    if (ctx->tx_cplt_cb) ctx->tx_cplt_cb();
+    /* 还有积压就立刻续下一段 (DMA 分段续传的关键) */
+    tx_kick(ctx);
+
+    /* 只有环形彻底排空才通知调用者
+     * —— 语义是「总线空闲」而非「一段发完」, RS485 的 DE 方向控制依赖这一点 */
+    if (!ctx->tx_active && tx_used(ctx) == 0) {
+        if (ctx->tx_cplt_cb) ctx->tx_cplt_cb();
+    }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
     USART_Ctx_t *ctx = ctx_from_huart(huart);
     if (!ctx) return;
+
+    /* TX 出错时 HAL 不会走 TxCplt, tx_active 会永久卡住导致该路再也发不出数据.
+     * 这里丢弃在途的那一段并复位状态, 保证端口能继续工作 (错误路径优先保可用性). */
+    if (ctx->tx_active && huart->gState == HAL_UART_STATE_READY) {
+        if (!ctx->tx_direct) {
+            ctx->tx_tail = (uint16_t)(ctx->tx_tail + ctx->tx_chunk);
+        }
+        ctx->tx_direct = 0;
+        ctx->tx_active = 0;
+        tx_kick(ctx);
+    }
 
     (void)HAL_UART_AbortReceive_IT(huart);
     usart_rx_rearm(ctx);
@@ -292,15 +385,6 @@ void DMA1_Channel7_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART2].
  * 公开 API
  * ================================================================ */
 
-void BSP_USART_Init(BSP_USART_Id_t id, uint32_t baudrate)
-{
-    BSP_USART_Config_t cfg = {
-        .baudrate = baudrate, .word_length = BSP_USART_WORD_8B,
-        .stop_bits = BSP_USART_STOP_1, .parity = BSP_USART_PARITY_NONE,
-    };
-    BSP_USART_InitEx(id, &cfg);
-}
-
 void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
 {
     if (id >= BSP_USART_COUNT || !config) return;
@@ -310,6 +394,18 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
 
     if (ctx->initialized) BSP_USART_DeInit(id);
     memset(ctx, 0, sizeof(*ctx));
+
+    /* ---- TX 环形缓冲: 必填. 未提供或非法 → 本路只收不发 ---- */
+    if (config->tx_buf && IS_POW2(config->tx_buf_size) &&
+        config->tx_buf_size <= 32768U) {
+        ctx->tx_buf  = config->tx_buf;
+        ctx->tx_size = config->tx_buf_size;
+        ctx->tx_mask = (uint16_t)(ctx->tx_size - 1U);
+    } else {
+        ctx->tx_buf  = NULL;
+        ctx->tx_size = 0;
+        ctx->tx_mask = 0;
+    }
 
     usart_enable_clk(hw->instance);
     usart_init_gpio(hw);
@@ -403,25 +499,69 @@ void BSP_USART_DeInit(BSP_USART_Id_t id)
  * 发送
  * ---------------------------------------------------------------- */
 
-uint16_t BSP_USART_Send(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
+uint16_t BSP_USART_Write(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
 {
     if (id >= BSP_USART_COUNT || !data || !len) return 0;
 
     USART_Ctx_t *ctx = &usart_ctx[id];
-    if (!ctx->initialized || ctx->tx_busy) return 0;
+    if (!ctx->initialized || !ctx->tx_buf) return 0;
 
-    uint16_t count = (len <= USART_TX_BUF_SIZE) ? len : USART_TX_BUF_SIZE;
-    memcpy(ctx->tx_buf, data, count);
+    uint32_t primask = usart_crit_enter();
 
-    ctx->tx_direct = 0;
-    ctx->tx_busy   = 1;
+    /* 剩余空间 = 总容量 − 已用量。多写者并发时靠临界区串行化 */
+    uint16_t space = (uint16_t)(ctx->tx_size - tx_used(ctx));
+    uint16_t n     = (len < space) ? len : space;
 
-    if (ctx->use_dma_tx)
-        HAL_UART_Transmit_DMA(&ctx->huart, ctx->tx_buf, count);
-    else
-        HAL_UART_Transmit_IT(&ctx->huart, ctx->tx_buf, count);
+    if (n) {
+        uint16_t idx    = (uint16_t)(ctx->tx_head & ctx->tx_mask);
+        uint16_t to_end = (uint16_t)(ctx->tx_size - idx);
 
-    return count;
+        if (n <= to_end) {
+            memcpy(&ctx->tx_buf[idx], data, n);
+        } else {
+            memcpy(&ctx->tx_buf[idx], data, to_end);
+            memcpy(ctx->tx_buf, data + to_end, (size_t)(n - to_end));
+        }
+        ctx->tx_head = (uint16_t)(ctx->tx_head + n);
+
+        tx_kick(ctx);
+    }
+
+    usart_crit_exit(primask);
+    return n;
+}
+
+uint16_t BSP_USART_Send(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
+{
+    return BSP_USART_Write(id, data, len);
+}
+
+uint16_t BSP_USART_TxSpace(BSP_USART_Id_t id)
+{
+    if (id >= BSP_USART_COUNT) return 0;
+    USART_Ctx_t *ctx = &usart_ctx[id];
+    if (!ctx->initialized || !ctx->tx_buf) return 0;
+
+    uint32_t primask = usart_crit_enter();
+    uint16_t space   = (uint16_t)(ctx->tx_size - tx_used(ctx));
+    usart_crit_exit(primask);
+    return space;
+}
+
+uint16_t BSP_USART_TxPending(BSP_USART_Id_t id)
+{
+    if (id >= BSP_USART_COUNT) return 0;
+    USART_Ctx_t *ctx = &usart_ctx[id];
+    if (!ctx->initialized) return 0;
+    return tx_used(ctx);
+}
+
+uint8_t BSP_USART_TxIdle(BSP_USART_Id_t id)
+{
+    if (id >= BSP_USART_COUNT) return 1;
+    USART_Ctx_t *ctx = &usart_ctx[id];
+    if (!ctx->initialized) return 1;
+    return (uint8_t)(!ctx->tx_active && tx_used(ctx) == 0);
 }
 
 uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
@@ -429,18 +569,37 @@ uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t l
     if (id >= BSP_USART_COUNT || !data || !len) return 0;
 
     USART_Ctx_t *ctx = &usart_ctx[id];
-    if (!ctx->initialized || ctx->tx_busy) return 0;
+    if (!ctx->initialized) return 0;
 
-    ctx->tx_direct = 1;
-    ctx->tx_busy   = 1;
-    HAL_UART_Transmit_IT(&ctx->huart, (uint8_t *)data, len);
-    return len;
+    uint32_t primask = usart_crit_enter();
+    uint16_t ret     = 0;
+
+    /* 只在环形为空且发送空闲时启用 —— 否则会插队, 破坏发送顺序 */
+    if (!ctx->tx_active && tx_used(ctx) == 0) {
+        ctx->tx_chunk  = len;
+        ctx->tx_direct = 1;
+        ctx->tx_active = 1;
+
+        HAL_StatusTypeDef st = ctx->use_dma_tx
+            ? HAL_UART_Transmit_DMA(&ctx->huart, (uint8_t *)data, len)
+            : HAL_UART_Transmit_IT (&ctx->huart, (uint8_t *)data, len);
+
+        if (st == HAL_OK) {
+            ret = len;
+        } else {
+            ctx->tx_active = 0;
+            ctx->tx_direct = 0;
+        }
+    }
+
+    usart_crit_exit(primask);
+    return ret;
 }
 
 uint16_t BSP_USART_SendString(BSP_USART_Id_t id, const char *str)
 {
     if (!str) return 0;
-    return BSP_USART_Send(id, (const uint8_t *)str, (uint16_t)strlen(str));
+    return BSP_USART_Write(id, (const uint8_t *)str, (uint16_t)strlen(str));
 }
 
 int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout)
@@ -451,7 +610,7 @@ int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout)
     if (!ctx->initialized) return -1;
 
     uint32_t elapsed = 0;
-    while (ctx->tx_busy) {
+    while (!BSP_USART_TxIdle(id)) {
         if (timeout > 0 && elapsed >= timeout) return -1;
         delay_us(1000);
         elapsed++;
@@ -554,3 +713,4 @@ int __io_putchar(int ch)
     HAL_UART_Transmit(&usart_ctx[BSP_USART1].huart, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
     return ch;
 }
+
