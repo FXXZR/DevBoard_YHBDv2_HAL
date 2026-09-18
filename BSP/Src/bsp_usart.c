@@ -701,9 +701,15 @@ void BSP_USART_ClearRxLost(BSP_USART_Id_t id)
 }
 
 /* ================================================================
- * printf 重定向 — __io_putchar (USART1 阻塞发送)
- * ================================================================ */
-
+ * printf 重定向说明
+ *
+ * 最新 __io_putchar ，在 Application/Common/log.c.
+ * 原因: 控制台端口由 LOG_Init() 决定, 放在日志模块里 printf 与 LOG 才能
+ * 自然共用同一路串口; 也避免在这里硬编码 BSP_USART1 —— 换日志口时
+ * 只需要改应用层的 LOG_Init(), 不用碰 BSP.
+ *
+ * 旧实现在本文件在此处注释, 旧实现有两个问题
+ * (阻塞 ~8.7ms/行; 与 IT/DMA 抢 huart->gState 导致输出被静默丢弃),
 int __io_putchar(int ch)
 {
     if (ch == '\n') {
@@ -713,4 +719,5 @@ int __io_putchar(int ch)
     HAL_UART_Transmit(&usart_ctx[BSP_USART1].huart, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
     return ch;
 }
+ * ================================================================ */
 

@@ -37,6 +37,9 @@ target_sources(app PRIVATE
     # FreeRTOS 移植钩子 (HAL 桥接)
     ${CMAKE_CURRENT_SOURCE_DIR}/Common/rtos_port_hooks.c
 
+    # 分级日志 (基于 bsp_usart TX 环形缓冲)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Common/log.c
+
     # ---- RTOS 任务 ----
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_init.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_led.c
