@@ -487,11 +487,13 @@ void BSP_LCD_Init(void)
         lcd_reg_config_ili9341();
     }
 
-    /* 7. 默认扫描方向 — SCAN_0
-     *    成像方向会随固件布局整体漂移, SCAN_0 是针对当前布局的经验性规避,
-     *    不是对 MADCTL 语义的修正. 改动本行前后务必实机确认方向.
-     *    完整的实测排除清单见 bsp_lcd_ili9341.h 的枚举注释. */
-    BSP_LCD_SetScanMode(BSP_LCD_SCAN_0);
+    /* 7. 默认扫描方向 — SCAN_6
+     *    成像方向会随固件布局整体漂移: 同一份源码, 只要二进制的布局变一点,
+     *    方向就可能 180° 翻转. SCAN_6 只是针对【当前布局】的实测取值,
+     *    不是对 MADCTL 语义的修正 —— 换个布局它可能就反了.
+     *    改动本行前后务必实机确认方向; 完整证据链见 bsp_lcd_ili9341.h 的
+     *    枚举注释与 Document/project-reference.md. */
+    BSP_LCD_SetScanMode(BSP_LCD_SCAN_6);
 
     /* 8. 清屏为黑色 */
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);
