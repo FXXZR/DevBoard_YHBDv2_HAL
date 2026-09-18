@@ -148,6 +148,11 @@ int BSP_USART_Read(BSP_USART_Id_t id, uint8_t *ch);
 /**
  * @brief  读多个字节 (非阻塞)
  * @return 实际读取到的字节数 (可能 < len)
+ * @note   RX 是单级缓冲, 应用自己就是唯一的排空者. 若应用落后超过一整圈,
+ *         DMA 已覆盖未读数据 —— 此时本函数会丢弃最旧的一段、只保留缓冲内
+ *         最新的一批, 并把丢弃量记入 BSP_USART_RxLost(). 所以返回的数据
+ *         可能"中间断了一截", 靠 RxLost 判断.
+ *         建议用回调模式及时排空, 而不是靠轮询.
  */
 uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len);
 
@@ -155,6 +160,17 @@ uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len);
  * @brief  清空接收缓冲 (丢弃所有未读数据)
  */
 void BSP_USART_FlushRx(BSP_USART_Id_t id);
+
+/**
+ * @brief  查询因应用读取不及时而被覆盖丢弃的字节数
+ * @return 累计丢弃字节数 (只增不减, 除非调用 BSP_USART_ClearRxLost)
+ * @note   长期为 0 才说明接收路径没有丢数据. 持续增长意味着应用排空太慢,
+ *         对策是提高读取频率、扩大 USART_RX_BUF_SIZE, 或改用回调模式.
+ */
+uint32_t BSP_USART_RxLost(BSP_USART_Id_t id);
+
+/** @brief 清零丢弃计数 */
+void BSP_USART_ClearRxLost(BSP_USART_Id_t id);
 
 #ifdef __cplusplus
 }

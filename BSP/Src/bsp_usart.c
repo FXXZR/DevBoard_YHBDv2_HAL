@@ -98,6 +98,8 @@ typedef struct {
     uint8_t             rx_buf[USART_RX_BUF_SIZE];
     volatile uint16_t   rx_count;      /* 累计写入绝对位置 (单调递增不重置) */
     volatile uint16_t   rx_read;       /* App 累计已读量 */
+    volatile uint32_t   rx_lost;       /* 因应用读取不及时被覆盖丢弃的字节数，正常应为0，
+                                        如果注册接收回调函数也基本不可能出现遗失 */
 
     /* TX */
     uint8_t             tx_buf[USART_TX_BUF_SIZE];
@@ -466,7 +468,10 @@ uint16_t BSP_USART_Available(BSP_USART_Id_t id)
     if (id >= BSP_USART_COUNT) return 0;
     USART_Ctx_t *ctx = &usart_ctx[id];
     if (!ctx->initialized) return 0;
-    return (uint16_t)(ctx->rx_count - ctx->rx_read);
+
+    /* 溢出时只报「满」 —— 不能让调用者拿到比缓冲还大的可读数 */
+    uint16_t avail = (uint16_t)(ctx->rx_count - ctx->rx_read);
+    return (avail > USART_RX_BUF_SIZE) ? USART_RX_BUF_SIZE : avail;
 }
 
 int BSP_USART_Read(BSP_USART_Id_t id, uint8_t *ch)
@@ -486,6 +491,17 @@ uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len)
     if (!ctx->initialized) return 0;
 
     uint16_t avail = (uint16_t)(ctx->rx_count - ctx->rx_read);
+
+    /* 溢出检测 —— 应用落后超过一整圈, DMA 已经覆盖了未读数据.
+     * 必须在这里重新对齐, 否则 avail 会大于缓冲大小, len 随之超过 SIZE,
+     * 下面第二段 memcpy 的 (len - first_chunk) 会越界读 rx_buf.
+     * 处理方式: 丢弃最旧的那一段, 只保留缓冲内的最后 SIZE 字节, 并记账.
+     * (可被观测的丢失, 好过静默返回被覆盖过的旧数据) */
+    if (avail > USART_RX_BUF_SIZE) {
+        ctx->rx_lost += (uint32_t)(avail - USART_RX_BUF_SIZE);
+        ctx->rx_read  = (uint16_t)(ctx->rx_count - USART_RX_BUF_SIZE);
+        avail         = USART_RX_BUF_SIZE;
+    }
     if (!avail) return 0;
     if (len > avail) len = avail;
 
@@ -507,6 +523,22 @@ void BSP_USART_FlushRx(BSP_USART_Id_t id)
     USART_Ctx_t *ctx = &usart_ctx[id];
     if (!ctx->initialized) return;
     ctx->rx_read = ctx->rx_count;
+}
+
+uint32_t BSP_USART_RxLost(BSP_USART_Id_t id)
+{
+    if (id >= BSP_USART_COUNT) return 0;
+    USART_Ctx_t *ctx = &usart_ctx[id];
+    if (!ctx->initialized) return 0;
+    return ctx->rx_lost;
+}
+
+void BSP_USART_ClearRxLost(BSP_USART_Id_t id)
+{
+    if (id >= BSP_USART_COUNT) return;
+    USART_Ctx_t *ctx = &usart_ctx[id];
+    if (!ctx->initialized) return;
+    ctx->rx_lost = 0;
 }
 
 /* ================================================================
