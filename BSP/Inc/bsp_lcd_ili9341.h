@@ -178,6 +178,26 @@ void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *fo
 void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
                          const uint16_t *data);
 
+/**
+ * @brief  批量写入像素数据 — DMA 异步版 (DMA2_Channel1, mem2mem → FSMC)
+ * @param  x,y      左上角坐标
+ * @param  w,h      宽/高 (像素)
+ * @param  data     像素数据缓冲区 (RGB565, 共 w*h 个, 需保持有效直到完成回调)
+ * @param  done_cb  传输完成回调 (中断上下文调用, 可为 NULL)
+ * @param  arg      回调参数透传
+ * @note   开窗由 CPU 完成, 像素搬运由 DMA 后台执行; 完成回调在 DMA 中断里触发.
+ *         供 LVGL 双缓冲 flush 使用: DMA 搬运 A 时 CPU 渲染 B
+ */
+void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint16_t *data,
+                             void (*done_cb)(void *arg), void *arg);
+
+/**
+ * @brief  阻塞等待 DMA 刷屏完成 (轮询 TC 标志, 不依赖中断)
+ * @note   用于诊断/同步场景; 正常流程应使用 done_cb 回调
+ */
+void BSP_LCD_DMA_WaitDone(void);
+
                         
 #ifdef __cplusplus
 }

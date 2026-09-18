@@ -97,6 +97,9 @@ typedef struct {
 
 static LCD_Ctx_t lcd_ctx;
 
+/* DMA 刷屏初始化 (实现在文件后部) */
+static void lcd_init_dma(void);
+
 /* ================================================================
  * 底层硬件访问 (内联)
  * ================================================================ */
@@ -486,6 +489,9 @@ void BSP_LCD_Init(void)
 
     /* 8. 清屏为黑色 */
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);
+
+    /* 9. DMA2_Channel1 刷屏通道 */
+    lcd_init_dma();
 }
 
 uint16_t BSP_LCD_ReadID(void)
@@ -613,6 +619,102 @@ void BSP_LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t c
     for (i = 0; i < total; i++) {
         lcd_write_data(color);
     }
+}
+
+/* ================================================================
+ * DMA 刷屏 (DMA2_Channel1, memory-to-memory → FSMC 数据区)
+ *
+ * LCD 数据地址 (0x6D000000) 是 FSMC 内存映射区, DMA2 可经 AHB 直接写入,
+ * 无需外设请求信号 (mem2mem 模式, 软件触发).
+ * 完成回调在 DMA2_Channel1_IRQHandler 中断上下文执行.
+ * ================================================================ */
+
+static DMA_HandleTypeDef lcd_dma;
+static void (*lcd_dma_done_cb)(void *arg) = NULL;
+static void *lcd_dma_done_arg = NULL;
+static volatile uint8_t lcd_dma_busy = 0;   /* 软件完成标志 (中断回调清 0) */
+
+static void lcd_dma_xfer_cplt(DMA_HandleTypeDef *hdma)
+{
+    (void) hdma;
+    lcd_dma_busy = 0;
+    if (lcd_dma_done_cb) {
+        lcd_dma_done_cb(lcd_dma_done_arg);
+    }
+}
+
+void DMA2_Channel1_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&lcd_dma);
+}
+
+static void lcd_init_dma(void)
+{
+    __HAL_RCC_DMA2_CLK_ENABLE();
+
+    lcd_dma.Instance                 = DMA2_Channel1;
+    lcd_dma.Init.Direction           = DMA_MEMORY_TO_MEMORY;   /* RAM → FSMC 数据区 */
+    /* mem2mem: 源=CPAR(像素缓冲), 目标=CMAR(LCD 数据寄存器)
+     * 源递增由 PINC 控制 → 必须 ENABLE; 目标固定由 MINC 控制 → DISABLE
+     * (配反会导致 DMA 只读 buf[0], 全屏显示同色) */
+    lcd_dma.Init.PeriphInc            = DMA_PINC_ENABLE;        /* 源 (像素数据) 递增 */
+    lcd_dma.Init.MemInc               = DMA_MINC_DISABLE;       /* 目标 (LCD 寄存器) 固定 */
+    lcd_dma.Init.PeriphDataAlignment  = DMA_PDATAALIGN_HALFWORD; /* 16 位总线 */
+    lcd_dma.Init.MemDataAlignment     = DMA_MDATAALIGN_HALFWORD;
+    lcd_dma.Init.Mode                 = DMA_NORMAL;
+    lcd_dma.Init.Priority             = DMA_PRIORITY_HIGH;
+    HAL_DMA_Init(&lcd_dma);
+
+    lcd_dma.XferCpltCallback = lcd_dma_xfer_cplt;
+
+    HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+}
+
+void BSP_LCD_DMA_WaitDone(void)
+{
+    /* 轮询软件完成标志 (中断回调清 0) — 比轮询 TC 硬件标志可靠:
+     * TC 会被中断处理清除, 软件标志在回调里维护 */
+    while (lcd_dma_busy) {
+    }
+}
+
+void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint16_t *data,
+                             void (*done_cb)(void *arg), void *arg)
+{
+    uint32_t total;
+
+    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) goto fail;
+    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
+    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+
+    total = (uint32_t)w * h;
+    if (total == 0) goto fail;
+
+    /* 开窗 + 内存写命令 (CPU 完成, DMA 只搬像素) */
+    lcd_open_window(x, y, w, h);
+    lcd_write_cmd(0x2C);
+
+    /* 防重入: 上一传输仍在飞 (LVGL 双缓冲可能连续调用 flush) → 先等待完成
+     * 正常情况几乎不会触发: DMA 搬一块 ~0.6ms, 渲染一块 ~2-5ms */
+    if (lcd_dma_busy) {
+        BSP_LCD_DMA_WaitDone();
+    }
+
+    lcd_dma_done_cb = done_cb;
+    lcd_dma_done_arg = arg;
+    lcd_dma_busy = 1;
+
+    if (HAL_DMA_Start_IT(&lcd_dma, (uint32_t)data, FSMC_LCD_DATA_ADDR, total) != HAL_OK) {
+        lcd_dma_busy = 0;
+        goto fail;
+    }
+    return;
+
+fail:
+    /* 启动失败/参数越界: 直接触发完成回调, 避免调用方永久等待 */
+    if (done_cb) done_cb(arg);
 }
 
 /* ================================================================

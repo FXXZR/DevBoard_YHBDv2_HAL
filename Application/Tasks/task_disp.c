@@ -9,6 +9,7 @@
 #include "task_disp.h"
 #include "lvgl.h"
 #include "lvgl_port.h"
+#include "bsp_lcd_ili9341.h"
 #include "bsp_xpt2046.h"
 #include "FreeRTOS.h"
 #include "task.h"
@@ -50,7 +51,8 @@ void vDispTask(void *pvParameters)
     lv_obj_set_pos(btn, 80, 200);
     lv_obj_set_size(btn, 80, 40);
     lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, label);
-    /* 4. LVGL 心跳 — 处理绘制/动画/事件 */
+
+    /* 5. LVGL 心跳 — 处理绘制/动画/事件 */
     for (;;) {
         lv_timer_handler();
         vTaskDelay(pdMS_TO_TICKS(5));
