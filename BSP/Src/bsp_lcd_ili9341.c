@@ -318,7 +318,8 @@ static void lcd_reg_config_ili9341(void)
     lcd_write_data(0x03); lcd_write_data(0x06); lcd_write_data(0x06);
     lcd_write_data(0x30); lcd_write_data(0x38); lcd_write_data(0x0F);
 
-    /* Memory Access Control (36h) — 默认扫描方向 */
+    /* Memory Access Control (36h) — 上电默认扫描方向 (防御性默认值)
+     * 最终方向由 BSP_LCD_Init 步骤 7 的 BSP_LCD_SetScanMode() 决定并覆盖此值 */
     lcd_write_cmd(0x36);
     lcd_write_data(0xC8);
 
@@ -380,6 +381,8 @@ static void lcd_reg_config_st7789v(void)
     lcd_write_cmd(0xC5);
     lcd_write_data(0x2D); lcd_write_data(0x33);
 
+    /* MADCTL (0x36) — 上电默认扫描方向 (防御性默认值)
+     * 最终方向由 BSP_LCD_Init 步骤 7 的 BSP_LCD_SetScanMode() 决定并覆盖此值 */
     lcd_write_cmd(0x36);
     lcd_write_data(0x00);
 
@@ -484,8 +487,11 @@ void BSP_LCD_Init(void)
         lcd_reg_config_ili9341();
     }
 
-    /* 7. 默认扫描方向 */
-    BSP_LCD_SetScanMode(BSP_LCD_SCAN_6);
+    /* 7. 默认扫描方向 — SCAN_0
+     *    成像方向会随固件布局整体漂移, SCAN_0 是针对当前布局的经验性规避,
+     *    不是对 MADCTL 语义的修正. 改动本行前后务必实机确认方向.
+     *    完整的实测排除清单见 bsp_lcd_ili9341.h 的枚举注释. */
+    BSP_LCD_SetScanMode(BSP_LCD_SCAN_0);
 
     /* 8. 清屏为黑色 */
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);
