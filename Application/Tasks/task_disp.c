@@ -5,7 +5,9 @@
  * 初始化 LVGL + 显示驱动, 创建简单控件, 周期驱动 lv_timer_handler()
  * 当前仅验证显示通路 (不接触摸输入)
  */
-#include <stdio.h>
+#define LOG_TAG "DISP"
+#include "log.h"
+
 #include "task_disp.h"
 #include "lvgl.h"
 #include "lvgl_port.h"
@@ -37,9 +39,9 @@ void vDispTask(void *pvParameters)
     /* 3. 触摸校准 — 出厂默认系数不适用当前屏, 强制校准
      *    (阻塞: 依次按屏幕 4 个十字参考点, 失败则退回默认系数) */
     if (BSP_XPT2046_TouchCalibrate()) {
-        printf("[Disp] Touch calibration OK\r\n");
+        LOG_I("touch calibration OK");
     } else {
-        printf("[Disp] Touch calibration failed, using defaults\r\n");
+        LOG_W("touch calibration failed, using defaults");
     }
 
     /* 4. 创建简单控件 */
