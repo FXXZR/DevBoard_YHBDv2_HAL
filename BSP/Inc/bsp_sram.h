@@ -30,7 +30,13 @@ extern "C" {
 
 enum {
     BSP_SRAM_BASE_ADDR = 0x68000000,   /* FSMC Bank1 Sector3 基地址 */
-    BSP_SRAM_SIZE      = 0x100000      /* IS62WV51216: 1MB (512K x 16bit) */
+    BSP_SRAM_SIZE      = 0x100000,     /* IS62WV51216: 1MB (512K x 16bit) */
+
+    /* LVGL 内存池预留区 (头 64KB) — 由 lv_conf.h 的 LV_MEM_POOL_ALLOC 使用
+     * 其他模块使用外部 SRAM 请从 BSP_SRAM_USER_BASE 开始, 避开此区域 */
+    BSP_SRAM_LVGL_BASE = BSP_SRAM_BASE_ADDR,             /* 0x68000000 */
+    BSP_SRAM_LVGL_SIZE = (64U * 1024U),                  /* LVGL 内存池 64KB */
+    BSP_SRAM_USER_BASE = BSP_SRAM_LVGL_BASE + BSP_SRAM_LVGL_SIZE,
 };
 
 /* ================================================================

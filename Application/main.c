@@ -23,6 +23,7 @@
 #include "bsp_systick.h"
 #include "bsp_led.h"
 #include "bsp_usart.h"
+#include "bsp_sram.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "task_init.h"
@@ -43,6 +44,10 @@ int main(void) {
     /* ---- BSP 外设驱动初始化 ---- */
     BSP_LED_Init();
     BSP_USART_Init(BSP_USART1, 115200);
+
+    /* 外部 SRAM 初始化 — 必须在进入 RTOS 前完成
+     * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪 */
+    BSP_SRAM_Init();
 
     /* ---- 启动 Banner ---- */
     printf("\r\n========================================\r\n");
