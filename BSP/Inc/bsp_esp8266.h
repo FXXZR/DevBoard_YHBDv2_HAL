@@ -99,10 +99,11 @@ uint8_t BSP_ESP8266_IsEnabled(void);
  * ================================================================ */
 
 /**
- * @brief  通过 USART3 向 ESP8266 发送数据 (中断方式, 非阻塞)
- * @param  data 待发送数据指针 (调用后即可释放/复用)
+ * @brief  通过 USART3 向 ESP8266 发送数据 (环形缓冲, 非阻塞)
+ * @param  data 待发送数据指针 (入队后即可释放/复用)
  * @param  len  数据长度 (字节)
- * @return 成功入队的字节数, 0 = 缓冲区满/忙/未初始化
+ * @return 成功入队的字节数, 0 = 缓冲区满/未初始化
+ * @note   返回 < len 说明缓冲区空间不足, 剩余部分需调用者续传.
  */
 uint16_t BSP_ESP8266_Send(const uint8_t *data, uint16_t len);
 
@@ -119,6 +120,22 @@ uint16_t BSP_ESP8266_SendString(const char *str);
  * @return 0 = 发送完成, -1 = 超时
  */
 int BSP_ESP8266_Flush(uint32_t timeout);
+
+/**
+ * @brief  查询发送缓冲还能入队多少字节
+ */
+uint16_t BSP_ESP8266_TxSpace(void);
+
+/**
+ * @brief  查询发送缓冲中尚未发出的字节数
+ */
+uint16_t BSP_ESP8266_TxPending(void);
+
+/**
+ * @brief  查询发送是否完全空闲 (上一条 AT 命令已完整发出)
+ * @return 1 = 空闲, 0 = 仍有数据在途
+ */
+uint8_t BSP_ESP8266_TxIdle(void);
 
 /**
  * @brief  查询 ESP8266 接收缓冲区中可读字节数

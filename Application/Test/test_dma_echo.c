@@ -52,6 +52,9 @@ static void on_echo_tx_done(void)
  */
 void Test_DMA_Echo(void)
 {
+    /* TX 环形缓冲现由调用者提供 (BSP_USART_InitEx 的必填项).
+     * 漏了不会报错, 但该路会变成"能收不能发" —— 回显测试会静默失效. */
+    static uint8_t echo_tx_buf[256];
     BSP_USART_Config_t cfg = {
         .baudrate         = 115200,
         .word_length      = BSP_USART_WORD_8B,
@@ -61,6 +64,8 @@ void Test_DMA_Echo(void)
         .tx_cplt_callback = on_echo_tx_done,
         .use_dma_rx       = 1,
         .use_dma_tx       = 1,
+        .tx_buf           = echo_tx_buf,
+        .tx_buf_size      = sizeof(echo_tx_buf),
     };
     BSP_USART_InitEx(BSP_USART1, &cfg);
 

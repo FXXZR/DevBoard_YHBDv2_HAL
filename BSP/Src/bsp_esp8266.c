@@ -41,6 +41,10 @@ static inline void delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
 static volatile uint8_t esp8266_initialized = 0;
 static volatile uint8_t esp8266_enabled    = 0;
 
+/* TX 环形缓冲 —— USART3 的使用者就是本模块, 所以由本模块提供.
+ * 开 1KB: AT 命令短, 但透传模式下一次可能灌入较长的 TCP 载荷 */
+static uint8_t esp8266_tx_buf[1024];
+
 /* ================================================================
  * 公开 API
  * ================================================================ */
@@ -104,6 +108,8 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
         .parity           = config->parity,
         .tx_cplt_callback = NULL,  /* ESP8266 全双工, 不需要方向切换 */
         .rx_idle_callback = config->rx_idle_callback,
+        .tx_buf           = esp8266_tx_buf,
+        .tx_buf_size      = sizeof(esp8266_tx_buf),
     };
     BSP_USART_InitEx(ESP8266_USART_ID, &usart_cfg);
 
@@ -209,6 +215,35 @@ int BSP_ESP8266_Flush(uint32_t timeout)
 {
     if (!esp8266_initialized) return -1;
     return BSP_USART_Flush(ESP8266_USART_ID, timeout);
+}
+
+/**
+ * @brief  查询发送缓冲还能入队多少字节
+ * @note   应用层通过本模块访问 USART3, 不直接调用 BSP_USART_* ——
+ *         否则会绕过本模块对串口的所有权约定
+ */
+uint16_t BSP_ESP8266_TxSpace(void)
+{
+    return BSP_USART_TxSpace(ESP8266_USART_ID);
+}
+
+/**
+ * @brief  查询发送缓冲中尚未发出的字节数
+ */
+uint16_t BSP_ESP8266_TxPending(void)
+{
+    return BSP_USART_TxPending(ESP8266_USART_ID);
+}
+
+/**
+ * @brief  查询发送是否完全空闲
+ * @return 1 = 空闲 (AT 命令已完整发出), 0 = 仍有数据在途
+ * @note   AT 命令是严格请求-应答式的: 必须确认上一条命令发完,
+ *         才能开始等它的响应, 否则会把两条命令的响应混在一起.
+ */
+uint8_t BSP_ESP8266_TxIdle(void)
+{
+    return BSP_USART_TxIdle(ESP8266_USART_ID);
 }
 
 uint16_t BSP_ESP8266_Available(void)

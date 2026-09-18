@@ -77,6 +77,19 @@ __attribute__((weak)) int _read(int file, char *ptr, int len)
   return len;
 }
 
+/* printf 重定向 (newlib) —— 保留供临时调试使用.
+ *
+ * 实际实现是 Application/Common/log.c 里的 __io_putchar (weak 符号, 链接期解析),
+ * 它把字符写进 bsp_usart 的 TX 环形缓冲 —— 非阻塞, 且不会和 DMA 抢 gState.
+ *
+ * 【使用约定】正式代码请用 LOG_E/W/I/D 宏 (Application/Common/log.h):
+ *   - LOG 有分级(Release 可整条编掉)、毫秒时间戳、模块标签、丢弃计数
+ *   - printf 什么都没有, 且在 ISR 里调用会阻塞中断上下文
+ *   - 两者现在都能用 %f (见根 CMakeLists.txt 中 -u _printf_float 的说明)
+ * printf 只应在临时排查时出现, 提交前应改回 LOG 或删掉.
+ *
+ */
+
 __attribute__((weak)) int _write(int file, char *ptr, int len)
 {
   (void)file;
