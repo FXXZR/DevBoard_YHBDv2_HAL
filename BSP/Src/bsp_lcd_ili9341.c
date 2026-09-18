@@ -7,7 +7,7 @@
  *            CMD 地址  = 0x6C000000  (A23=0 → DC=0 → 写命令寄存器)
  *            DATA 地址 = 0x6D000000  (A23=1 → DC=1 → 写数据寄存器)
  *
- *          FSMC 时序模式 B, 16 位数据总线.
+ *          FSMC 时序模式 D (扩展模式, 读写独立时序), 16 位数据总线.
  *
  *          适配自野火霸道 V2 参考驱动.
  */
@@ -166,20 +166,40 @@ static void lcd_init_fsmc_gpio(void)
 
 static void lcd_init_fsmc(void)
 {
-    /* FSMC 时序 — 匹配野火标准库参考驱动, HAL 算术适配
-     * ADDSET=1 → 地址建立 2 HCLK
-     * DATAST=4 → 写使能 (4+1)=5 HCLK≈69ns (ILI9341 写≥66ns → 余量 OK)
-     * CLKDivision=2 → HAL算术: (2-1)<<20=0x00100000 (异步模式不使用)
-     * DataLatency=2  → HAL算术: (2-2)<<24=0x00000000 (异步模式不使用)
-     */
+    /* ---- 写时序 (BTR) — 匹配野火标准库参考驱动, HAL 算术适配 ----
+     * ADDSET=1 → 地址建立 2 HCLK ≈ 27.8ns
+     * DATAST=4 → 数据阶段 (写使能低电平) 5 HCLK ≈ 69.4ns
+     *            整个写周期 = 地址建立 + 数据阶段 + 2 ≈ 7 HCLK ≈ 97ns
+     * 手册 (ILI9341/ST7789V 8080 并口): T_WRL 写低电平 ≥15ns, T_WC 写周期 ≥66ns
+     *            → 两项均满足, 余量分别约 4.6× 和 47% */
     FSMC_NORSRAM_TimingTypeDef timing = {0};
     timing.AddressSetupTime      = 0x01;
     timing.AddressHoldTime       = 0x00;
     timing.DataSetupTime         = 0x04;
     timing.BusTurnAroundDuration = 0x00;
-    timing.CLKDivision           = 0x00;
-    timing.DataLatency           = 0x00;
-    timing.AccessMode            = FSMC_ACCESS_MODE_B;   /* LCD 用模式 B */
+    /* CLKDivision 必须 ≥1, DataLatency 必须 ≥2: F1 LL 计算 (x-1)/(x-2),
+     * 传 0 会无符号下溢 → BTR4 高 12 位全为 1 (实测 0x3FF00401, ACCMOD 错成
+     * Mode D). 异步模式这些位无功能影响, 但寄存器值错乱是隐患, 必须写合法值 */
+    timing.CLKDivision           = 0x01;
+    timing.DataLatency           = 0x02;
+    timing.AccessMode            = FSMC_ACCESS_MODE_D;   /* 扩展模式: BTR=写, BWTR=读 */
+
+    /* ---- 读时序 (BWTR) ----
+     * 8080 并口的读周期远慢于写: 手册要求 RD 低电平 (T_RDLFM) ≥355ns,
+     * 写低电平只要 ≥15ns. 原来读写共用写时序 (RDL 仅 69ns), 短了约 5 倍.
+     * ADDSET=15 → 地址建立 16 HCLK ≈ 222ns
+     * DATAST=26 → 数据阶段 27 HCLK ≈ 375ns (≥355ns, 余量约 5.6%)
+     * 注: T_RCSFM (读帧存时 CS 建立) 要求 ≥355ns, 当前 222ns 仍未满足;
+     *     读只用于 ReadID / GetPixel, 不在热路径, 如需完全合规可把
+     *     rtiming.AddressSetupTime 提到 25 (读周期变 736ns) */
+    FSMC_NORSRAM_TimingTypeDef rtiming = {0};
+    rtiming.AddressSetupTime      = 0x0F;
+    rtiming.AddressHoldTime       = 0x00;
+    rtiming.DataSetupTime         = 0x1A;
+    rtiming.BusTurnAroundDuration = 0x00;
+    rtiming.CLKDivision           = 0x01;
+    rtiming.DataLatency           = 0x02;
+    rtiming.AccessMode            = FSMC_ACCESS_MODE_D;
 
     lcd_ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
     lcd_ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
@@ -193,12 +213,13 @@ static void lcd_init_fsmc(void)
     lcd_ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
     lcd_ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
     lcd_ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
-    lcd_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_DISABLE;
+    lcd_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_ENABLE;
     lcd_ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
     lcd_ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
     lcd_ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
 
-    HAL_SRAM_Init(&lcd_ctx.handle, &timing, &timing);
+    /* Timing → BTR (写); rtiming → BWTR (读, 此前与写共用, 从未真正生效) */
+    HAL_SRAM_Init(&lcd_ctx.handle, &timing, &rtiming);
 }
 
 /* ================================================================

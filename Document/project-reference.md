@@ -123,6 +123,16 @@ RTC 时钟源:
 
 Flash latency = 2WS. SysTick = 1ms via `HAL_IncTick()`.
 
+## Known Hardware Quirks (硬件坑, 改动前必读)
+
+### FSMC 时序参数下溢
+
+F1 HAL LL 的 `FSMC_NORSRAM_Timing_Init` 计算 BTR 时做 `(CLKDivision-1)` / `(DataLatency-2)`, 传 0 会无符号下溢 (实测 BTR4=0x3FF00401, ACCMOD 错成 Mode D). 异步模式无功能影响, 但必须传合法值 (CLKDivision≥1, DataLatency≥2).
+
+### 8080 并口读写时序不对称
+
+LCD 的 8080 并口读周期远慢于写: 手册要求 RD 低电平 ≥355ns (T_RDLFM), 而写低电平只要 ≥15ns (T_WRL)、写周期 ≥66ns (T_WC). 原来读写共用同一套 BTR 时序, 读脉冲只有 69ns, 短了约 5 倍 —— 失败模式是"读回的值微妙地不对", 极难察觉. 现改为扩展模式 (Mode D): BTR 管写、BWTR 管读.
+
 ## Enabled HAL Modules
 
 | 模块 | 宏 | 源文件 |
