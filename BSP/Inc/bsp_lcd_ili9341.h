@@ -47,14 +47,47 @@ enum {
  * 扫描方向
  * ================================================================ */
 
+/* 编码 = mode<<5 写入 MADCTL (0x36): MY(bit7)=行反向, MX(bit6)=列反向, MV(bit5)=行列互换
+ * 偶数模式=横屏 (X=240 Y=320), 奇数模式=竖屏 (X=320 Y=240)
+ *
+ * ==== 屏幕成像方向会随固件布局漂移 (2026-09 重测, 改动默认值前必读) ====
+ * 现象: 同一份源码, 只要二进制的体积/布局变一点, 成像方向就可能整体 180° 翻转.
+ *       实测: 关掉 21 个未使用的 LVGL 模块 (306584 B) → 用 SCAN_6 时翻转;
+ *             把它们重新打开 (375044 B) → 同样的 SCAN_6 就是正向.
+ *       逐步开模块二分后, 临界点夹在 317924 B 与 328504 B 之间 (约 10.5 KB).
+ *       注意 LCD 驱动的机器码在所有这些版本里逐字节相同, 只是落在了不同 Flash 地址.
+ *
+ * 已排除 (逐条实测, 不要再重复走):
+ *   - MADCTL 内容被改写: 不存在. 写 0xC0 读回 0xC0, 但面板不响应读命令时
+ *     读到的是总线残留; 已用"故意留 0x00EF 残留再读回"判别法确认读回可信.
+ *     在【确认翻转】的 build 上读回 MADCTL 同样是 0xC0 —— 与不翻转时完全一致.
+ *   - 面板状态差异: 0x09/0x0A/0x0C 等可读寄存器在两个档位里逐字节相同
+ *     (0x0A=0x9C 说明确实已显示开启、退出睡眠).
+ *   - 长延时不足: 复位低电平/释放后/sleep-out 后全改为真实毫秒 (10/120/120ms,
+ *     手册要求) 后仍然翻转.
+ *   - FSMC 时序参数: DATAST 4→8 和 ADDSET 1→15 都试过, 两次 FLASH 与基准一字不差,
+ *     仍然翻转. 这一类实验在设计上就不可能影响本现象 —— FSMC 的 NWE/NOE/CS 波形
+ *     由硬件从 HCLK 分频生成, 与代码布局无关. 不必再试.
+ *   - DMA 刷屏路径: 校准十字出现在 lv_timer_handler() 首次调用之前, flush 一次都没跑过.
+ *   - 两个初始化序列的方向类寄存器完全相同 (0x36=0x00, 0xB6=0x0A/0xA2), 枚举值两版一致.
+ *   - BSP_SRAM_Init() 单独不足以触发: f385c75 + 它 = 正向.
+ *
+ * 已知定位精度: 对翻转档 (317924 B) 与正向档 (328504 B) 做 nm 比对, 整个 LCD 驱动
+ *   被整体平移 0x34 = 52 字节 (多出来的 10.5 KB 里只有这 52 字节落在驱动之前,
+ *   其余全落在驱动之后). 就是这个平移决定了成像方向.
+ *
+ * 结论: 根因尚未确定. 两个档位的可读寄存器完全一致, 所以嫌疑落在"某条只写不可读的
+ *       面板寄存器是否落到面板上"; 但 FSMC 波形既与布局无关, 这一步的物理机制目前
+ *       没有解释, 需要示波器对比测量才能收口.
+ *       当前生产配置用 SCAN_0 是对该现象的经验性规避, 不是对 MADCTL 语义的修正. */
 typedef enum {
-    BSP_LCD_SCAN_0 = 0,     /* 上→下, 左→右 (横屏, X=240 Y=320) */
+    BSP_LCD_SCAN_0 = 0,     /* 上→下, 左→右 (横屏, X=240 Y=320) — 当前生产默认 (见上, 经验性规避) */
     BSP_LCD_SCAN_1 = 1,     /* 上→下, 右→左 (竖屏, X=320 Y=240) */
     BSP_LCD_SCAN_2 = 2,     /* 下→上, 左→右 (横屏, X=240 Y=320) */
     BSP_LCD_SCAN_3 = 3,     /* 下→上, 右→左 (竖屏, X=320 Y=240) */
     BSP_LCD_SCAN_4 = 4,     /* 左→右, 上→下 (横屏, X=240 Y=320) */
     BSP_LCD_SCAN_5 = 5,     /* 右→左, 上→下 (竖屏, X=320 Y=240) */
-    BSP_LCD_SCAN_6 = 6,     /* 左→右, 下→上 (横屏, X=240 Y=320) — 默认 */
+    BSP_LCD_SCAN_6 = 6,     /* 左→右, 下→上 (横屏, X=240 Y=320) — 野火参考驱动的默认值 */
     BSP_LCD_SCAN_7 = 7,     /* 右→左, 下→上 (竖屏, X=320 Y=240) */
 } BSP_LCD_ScanMode_t;
 
@@ -168,6 +201,37 @@ void BSP_LCD_DrawChar(uint16_t x, uint16_t y, char ch, const sFONT *font,
 void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *font,
                         uint16_t fg_color, uint16_t bg_color);
 
+/**
+ * @brief  批量写入像素数据 (GRAM 窗口)
+ * @param  x,y   左上角坐标
+ * @param  w,h   宽/高 (像素)
+ * @param  data  像素数据缓冲区 (RGB565, 共 w*h 个)
+ * @note   用于 LVGL 等上层库的 flush 回调 — 先开窗再连续写数据, 比逐点快得多
+ */
+void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         const uint16_t *data);
+
+/**
+ * @brief  批量写入像素数据 — DMA 异步版 (DMA2_Channel1, mem2mem → FSMC)
+ * @param  x,y      左上角坐标
+ * @param  w,h      宽/高 (像素)
+ * @param  data     像素数据缓冲区 (RGB565, 共 w*h 个, 需保持有效直到完成回调)
+ * @param  done_cb  传输完成回调 (中断上下文调用, 可为 NULL)
+ * @param  arg      回调参数透传
+ * @note   开窗由 CPU 完成, 像素搬运由 DMA 后台执行; 完成回调在 DMA 中断里触发.
+ *         供 LVGL 双缓冲 flush 使用: DMA 搬运 A 时 CPU 渲染 B
+ */
+void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint16_t *data,
+                             void (*done_cb)(void *arg), void *arg);
+
+/**
+ * @brief  阻塞等待 DMA 刷屏完成 (轮询 TC 标志, 不依赖中断)
+ * @note   用于诊断/同步场景; 正常流程应使用 done_cb 回调
+ */
+void BSP_LCD_DMA_WaitDone(void);
+
+                        
 #ifdef __cplusplus
 }
 #endif

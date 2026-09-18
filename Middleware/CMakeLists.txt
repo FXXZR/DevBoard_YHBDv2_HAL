@@ -17,9 +17,12 @@ add_subdirectory(FatFs)
 # ---- FreeRTOS (V11.3.0) ----
 add_subdirectory(FreeRTOS)
 
+# ---- LVGL (v8.3.11) ----
+add_subdirectory(lvgl-8.3.11)
+
 # ---- middleware 聚合目标 (STATIC) ----
 # 汇集 fatfs/freertos OBJECT 库的 .o 文件, 打包为 libmiddleware.a
 # STATIC 确保 OBJECT 的 .o 被正确传播到最终可执行文件
 # (INTERFACE 库无法可靠传递 OBJECT 库的目标文件)
 add_library(middleware STATIC)
-target_link_libraries(middleware PUBLIC fatfs freertos)
+target_link_libraries(middleware PUBLIC fatfs freertos lvgl)

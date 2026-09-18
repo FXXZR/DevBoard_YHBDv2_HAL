@@ -7,7 +7,7 @@
  *            CMD 地址  = 0x6C000000  (A23=0 → DC=0 → 写命令寄存器)
  *            DATA 地址 = 0x6D000000  (A23=1 → DC=1 → 写数据寄存器)
  *
- *          FSMC 时序模式 B, 16 位数据总线.
+ *          FSMC 时序模式 D (扩展模式, 读写独立时序), 16 位数据总线.
  *
  *          适配自野火霸道 V2 参考驱动.
  */
@@ -97,6 +97,9 @@ typedef struct {
 
 static LCD_Ctx_t lcd_ctx;
 
+/* DMA 刷屏初始化 (实现在文件后部) */
+static void lcd_init_dma(void);
+
 /* ================================================================
  * 底层硬件访问 (内联)
  * ================================================================ */
@@ -166,20 +169,40 @@ static void lcd_init_fsmc_gpio(void)
 
 static void lcd_init_fsmc(void)
 {
-    /* FSMC 时序 — 匹配野火标准库参考驱动, HAL 算术适配
-     * ADDSET=1 → 地址建立 2 HCLK
-     * DATAST=4 → 写使能 (4+1)=5 HCLK≈69ns (ILI9341 写≥66ns → 余量 OK)
-     * CLKDivision=2 → HAL算术: (2-1)<<20=0x00100000 (异步模式不使用)
-     * DataLatency=2  → HAL算术: (2-2)<<24=0x00000000 (异步模式不使用)
-     */
+    /* ---- 写时序 (BTR) — 匹配野火标准库参考驱动, HAL 算术适配 ----
+     * ADDSET=1 → 地址建立 2 HCLK ≈ 27.8ns
+     * DATAST=4 → 数据阶段 (写使能低电平) 5 HCLK ≈ 69.4ns
+     *            整个写周期 = 地址建立 + 数据阶段 + 2 ≈ 7 HCLK ≈ 97ns
+     * 手册 (ILI9341/ST7789V 8080 并口): T_WRL 写低电平 ≥15ns, T_WC 写周期 ≥66ns
+     *            → 两项均满足, 余量分别约 4.6× 和 47% */
     FSMC_NORSRAM_TimingTypeDef timing = {0};
     timing.AddressSetupTime      = 0x01;
     timing.AddressHoldTime       = 0x00;
     timing.DataSetupTime         = 0x04;
     timing.BusTurnAroundDuration = 0x00;
-    timing.CLKDivision           = 0x00;
-    timing.DataLatency           = 0x00;
-    timing.AccessMode            = FSMC_ACCESS_MODE_B;   /* LCD 用模式 B */
+    /* CLKDivision 必须 ≥1, DataLatency 必须 ≥2: F1 LL 计算 (x-1)/(x-2),
+     * 传 0 会无符号下溢 → BTR4 高 12 位全为 1 (实测 0x3FF00401, ACCMOD 错成
+     * Mode D). 异步模式这些位无功能影响, 但寄存器值错乱是隐患, 必须写合法值 */
+    timing.CLKDivision           = 0x01;
+    timing.DataLatency           = 0x02;
+    timing.AccessMode            = FSMC_ACCESS_MODE_D;   /* 扩展模式: BTR=写, BWTR=读 */
+
+    /* ---- 读时序 (BWTR) ----
+     * 8080 并口的读周期远慢于写: 手册要求 RD 低电平 (T_RDLFM) ≥355ns,
+     * 写低电平只要 ≥15ns. 原来读写共用写时序 (RDL 仅 69ns), 短了约 5 倍.
+     * ADDSET=15 → 地址建立 16 HCLK ≈ 222ns
+     * DATAST=26 → 数据阶段 27 HCLK ≈ 375ns (≥355ns, 余量约 5.6%)
+     * 注: T_RCSFM (读帧存时 CS 建立) 要求 ≥355ns, 当前 222ns 仍未满足;
+     *     读只用于 ReadID / GetPixel, 不在热路径, 如需完全合规可把
+     *     rtiming.AddressSetupTime 提到 25 (读周期变 736ns) */
+    FSMC_NORSRAM_TimingTypeDef rtiming = {0};
+    rtiming.AddressSetupTime      = 0x0F;
+    rtiming.AddressHoldTime       = 0x00;
+    rtiming.DataSetupTime         = 0x1A;
+    rtiming.BusTurnAroundDuration = 0x00;
+    rtiming.CLKDivision           = 0x01;
+    rtiming.DataLatency           = 0x02;
+    rtiming.AccessMode            = FSMC_ACCESS_MODE_D;
 
     lcd_ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
     lcd_ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
@@ -193,12 +216,13 @@ static void lcd_init_fsmc(void)
     lcd_ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
     lcd_ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
     lcd_ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
-    lcd_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_DISABLE;
+    lcd_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_ENABLE;
     lcd_ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
     lcd_ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
     lcd_ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
 
-    HAL_SRAM_Init(&lcd_ctx.handle, &timing, &timing);
+    /* Timing → BTR (写); rtiming → BWTR (读, 此前与写共用, 从未真正生效) */
+    HAL_SRAM_Init(&lcd_ctx.handle, &timing, &rtiming);
 }
 
 /* ================================================================
@@ -294,7 +318,8 @@ static void lcd_reg_config_ili9341(void)
     lcd_write_data(0x03); lcd_write_data(0x06); lcd_write_data(0x06);
     lcd_write_data(0x30); lcd_write_data(0x38); lcd_write_data(0x0F);
 
-    /* Memory Access Control (36h) — 默认扫描方向 */
+    /* Memory Access Control (36h) — 上电默认扫描方向 (防御性默认值)
+     * 最终方向由 BSP_LCD_Init 步骤 7 的 BSP_LCD_SetScanMode() 决定并覆盖此值 */
     lcd_write_cmd(0x36);
     lcd_write_data(0xC8);
 
@@ -356,6 +381,8 @@ static void lcd_reg_config_st7789v(void)
     lcd_write_cmd(0xC5);
     lcd_write_data(0x2D); lcd_write_data(0x33);
 
+    /* MADCTL (0x36) — 上电默认扫描方向 (防御性默认值)
+     * 最终方向由 BSP_LCD_Init 步骤 7 的 BSP_LCD_SetScanMode() 决定并覆盖此值 */
     lcd_write_cmd(0x36);
     lcd_write_data(0x00);
 
@@ -460,11 +487,17 @@ void BSP_LCD_Init(void)
         lcd_reg_config_ili9341();
     }
 
-    /* 7. 默认扫描方向 */
-    BSP_LCD_SetScanMode(BSP_LCD_SCAN_6);
+    /* 7. 默认扫描方向 — SCAN_0
+     *    成像方向会随固件布局整体漂移, SCAN_0 是针对当前布局的经验性规避,
+     *    不是对 MADCTL 语义的修正. 改动本行前后务必实机确认方向.
+     *    完整的实测排除清单见 bsp_lcd_ili9341.h 的枚举注释. */
+    BSP_LCD_SetScanMode(BSP_LCD_SCAN_0);
 
     /* 8. 清屏为黑色 */
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);
+
+    /* 9. DMA2_Channel1 刷屏通道 */
+    lcd_init_dma();
 }
 
 uint16_t BSP_LCD_ReadID(void)
@@ -592,6 +625,102 @@ void BSP_LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t c
     for (i = 0; i < total; i++) {
         lcd_write_data(color);
     }
+}
+
+/* ================================================================
+ * DMA 刷屏 (DMA2_Channel1, memory-to-memory → FSMC 数据区)
+ *
+ * LCD 数据地址 (0x6D000000) 是 FSMC 内存映射区, DMA2 可经 AHB 直接写入,
+ * 无需外设请求信号 (mem2mem 模式, 软件触发).
+ * 完成回调在 DMA2_Channel1_IRQHandler 中断上下文执行.
+ * ================================================================ */
+
+static DMA_HandleTypeDef lcd_dma;
+static void (*lcd_dma_done_cb)(void *arg) = NULL;
+static void *lcd_dma_done_arg = NULL;
+static volatile uint8_t lcd_dma_busy = 0;   /* 软件完成标志 (中断回调清 0) */
+
+static void lcd_dma_xfer_cplt(DMA_HandleTypeDef *hdma)
+{
+    (void) hdma;
+    lcd_dma_busy = 0;
+    if (lcd_dma_done_cb) {
+        lcd_dma_done_cb(lcd_dma_done_arg);
+    }
+}
+
+void DMA2_Channel1_IRQHandler(void)
+{
+    HAL_DMA_IRQHandler(&lcd_dma);
+}
+
+static void lcd_init_dma(void)
+{
+    __HAL_RCC_DMA2_CLK_ENABLE();
+
+    lcd_dma.Instance                 = DMA2_Channel1;
+    lcd_dma.Init.Direction           = DMA_MEMORY_TO_MEMORY;   /* RAM → FSMC 数据区 */
+    /* mem2mem: 源=CPAR(像素缓冲), 目标=CMAR(LCD 数据寄存器)
+     * 源递增由 PINC 控制 → 必须 ENABLE; 目标固定由 MINC 控制 → DISABLE
+     * (配反会导致 DMA 只读 buf[0], 全屏显示同色) */
+    lcd_dma.Init.PeriphInc            = DMA_PINC_ENABLE;        /* 源 (像素数据) 递增 */
+    lcd_dma.Init.MemInc               = DMA_MINC_DISABLE;       /* 目标 (LCD 寄存器) 固定 */
+    lcd_dma.Init.PeriphDataAlignment  = DMA_PDATAALIGN_HALFWORD; /* 16 位总线 */
+    lcd_dma.Init.MemDataAlignment     = DMA_MDATAALIGN_HALFWORD;
+    lcd_dma.Init.Mode                 = DMA_NORMAL;
+    lcd_dma.Init.Priority             = DMA_PRIORITY_HIGH;
+    HAL_DMA_Init(&lcd_dma);
+
+    lcd_dma.XferCpltCallback = lcd_dma_xfer_cplt;
+
+    HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 6, 0);
+    HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
+}
+
+void BSP_LCD_DMA_WaitDone(void)
+{
+    /* 轮询软件完成标志 (中断回调清 0) — 比轮询 TC 硬件标志可靠:
+     * TC 会被中断处理清除, 软件标志在回调里维护 */
+    while (lcd_dma_busy) {
+    }
+}
+
+void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                             const uint16_t *data,
+                             void (*done_cb)(void *arg), void *arg)
+{
+    uint32_t total;
+
+    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) goto fail;
+    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
+    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+
+    total = (uint32_t)w * h;
+    if (total == 0) goto fail;
+
+    /* 开窗 + 内存写命令 (CPU 完成, DMA 只搬像素) */
+    lcd_open_window(x, y, w, h);
+    lcd_write_cmd(0x2C);
+
+    /* 防重入: 上一传输仍在飞 (LVGL 双缓冲可能连续调用 flush) → 先等待完成
+     * 正常情况几乎不会触发: DMA 搬一块 ~0.6ms, 渲染一块 ~2-5ms */
+    if (lcd_dma_busy) {
+        BSP_LCD_DMA_WaitDone();
+    }
+
+    lcd_dma_done_cb = done_cb;
+    lcd_dma_done_arg = arg;
+    lcd_dma_busy = 1;
+
+    if (HAL_DMA_Start_IT(&lcd_dma, (uint32_t)data, FSMC_LCD_DATA_ADDR, total) != HAL_OK) {
+        lcd_dma_busy = 0;
+        goto fail;
+    }
+    return;
+
+fail:
+    /* 启动失败/参数越界: 直接触发完成回调, 避免调用方永久等待 */
+    if (done_cb) done_cb(arg);
 }
 
 /* ================================================================
@@ -738,5 +867,23 @@ void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *fo
 
         str++;
         cur_x += font->Width;
+    }
+}
+
+void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
+                         const uint16_t *data)
+{
+    uint32_t total = (uint32_t)w * h;
+    uint32_t i;
+
+    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return;
+    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
+    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+
+    lcd_open_window(x, y, w, h);
+    lcd_write_cmd(0x2C);
+
+    for (i = 0; i < total; i++) {
+        lcd_write_data(data[i]);
     }
 }

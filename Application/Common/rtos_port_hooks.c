@@ -10,7 +10,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "stm32f1xx_hal.h"
-
+#include "lvgl.h"
 /*-----------------------------------------------------------------------*/
 /* Tick Hook — 每个 FreeRTOS tick 调用一次 (1ms)                         */
 /*                                                                       */
@@ -20,6 +20,7 @@
 void vApplicationTickHook(void)
 {
     HAL_IncTick();
+    lv_tick_inc(1);
 }
 
 /*-----------------------------------------------------------------------*/
