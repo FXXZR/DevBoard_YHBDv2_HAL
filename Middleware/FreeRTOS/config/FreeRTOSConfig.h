@@ -93,8 +93,22 @@
 /* Assert                                                                    */
 /*---------------------------------------------------------------------------*/
 
-#define configASSERT( x ) \
-    if( ( x ) == 0 ) { taskDISABLE_INTERRUPTS(); for( ;; ); }
+/* 收编到 BSP 的零依赖 panic 通道 —— 见 BSP/Inc/bsp_assert.h
+ *
+ *   相比原始的 if(...) { taskDISABLE_INTERRUPTS(); for(;;); }:
+ *     - 带上 __FILE__ / __LINE__ / 失败的表达式原文, 能直接定位
+ *     - 输出走轮询直写, 不经过 log 的环形缓冲 (缓冲满时那条最关键的信息
+ *       恰恰最容易被丢掉), 也不经过 DMA
+ *     - 用 __disable_irq() 全冻结, 而不是只抬 BASEPRI (后者会漏掉
+ *       NVIC 优先级 0~4 的高优先级中断)
+ *     - 带 do{}while(0) 包裹, 消除悬空 else 的隐患
+ *     - Debug 停机等调试器 / Release 复位自恢复
+ *
+ * 注: 这个 include 是本工程里 Middleware → BSP 的唯一一条编译期依赖边,
+ *     见 Middleware/FreeRTOS/CMakeLists.txt 中的 include 路径说明. */
+#include "bsp_assert.h"
+
+#define configASSERT( x )   BSP_ASSERT( x )
 
 /*---------------------------------------------------------------------------*/
 /* Optional API functions — 1 = 包含, 按需启用                               */

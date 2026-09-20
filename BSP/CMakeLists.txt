@@ -16,6 +16,7 @@ add_library(bsp OBJECT)
 
 # BSP 源文件列表
 target_sources(bsp PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_assert.c     # panic 通道 (基础设施, 无依赖)
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_systick.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_usart.c

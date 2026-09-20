@@ -16,7 +16,7 @@
  *
  *          零开销: 级别过滤在【预处理期】完成, 低于 LOG_LEVEL 的语句
  *          整条被替换成 ((void)0) —— 连格式化字符串都不进 Flash.
- *          Release 构建加 -DLOG_LEVEL=LOG_LVL_WARN 即可全部编掉.
+ *          Release 构建加 -DLOG_LEVEL=LOG_LEVEL_WARN 即可全部编掉.
  *
  *          上下文: 任务和 ISR 都可以调用. 非阻塞 —— 格式化后拷入 USART
  *          环形缓冲立即返回, 由 DMA/IT 在后台发出.
@@ -48,18 +48,39 @@ extern "C" {
  * 级别
  * ================================================================ */
 
+/* 级别数值 —— 必须是【宏】, 不能只用 enum.
+ *
+ *   原因: #if 在【预处理期】求值, 那时 enum 常量还不存在. 按 C11 §6.10.1p4,
+ *   宏展开后残留的标识符一律被替换成 0 —— 于是
+ *       #if LOG_LEVEL >= LOG_LVL_ERROR
+ *   会退化成  #if 0 >= 0, 恒为真, 四个级别永远全部编进来, 分级完全失效
+ *   (传任何 -DLOG_LEVEL= 都没用). LVGL 的 lv_log.h 也正是为此把级别定义成宏.
+ *
+ *   Log_Level_t 复用同一组宏, 保证两边数值永远一致. */
+#define LOG_LEVEL_NONE   0
+#define LOG_LEVEL_ERROR  1
+#define LOG_LEVEL_WARN   2
+#define LOG_LEVEL_INFO   3
+#define LOG_LEVEL_DEBUG  4
+
 typedef enum {
-    LOG_LVL_NONE = 0,   /* 全部关闭 */
-    LOG_LVL_ERROR,      /* 错误 —— 功能不可用 */
-    LOG_LVL_WARN,       /* 警告 —— 可继续但需关注 */
-    LOG_LVL_INFO,       /* 关键流程节点 */
-    LOG_LVL_DEBUG,      /* 细节, 默认级别 */
+    LOG_LVL_NONE  = LOG_LEVEL_NONE,   /* 全部关闭 */
+    LOG_LVL_ERROR = LOG_LEVEL_ERROR,  /* 错误 —— 功能不可用 */
+    LOG_LVL_WARN  = LOG_LEVEL_WARN,   /* 警告 —— 可继续但需关注 */
+    LOG_LVL_INFO  = LOG_LEVEL_INFO,   /* 关键流程节点 */
+    LOG_LVL_DEBUG = LOG_LEVEL_DEBUG,  /* 细节, 默认级别 */
     LOG_LVL_COUNT
 } Log_Level_t;
 
-/* 编译期默认级别 —— Release: -DLOG_LEVEL=LOG_LVL_WARN */
+/* 编译期默认级别 —— Release: -DLOG_LEVEL=LOG_LEVEL_WARN */
 #ifndef LOG_LEVEL
-#define LOG_LEVEL   LOG_LVL_DEBUG
+#define LOG_LEVEL   LOG_LEVEL_DEBUG
+#endif
+
+/* 防呆: LOG_LVL_x 与 LOG_LEVEL_x 只差一个字母, 写成前者会被替换成 0,
+ * 表现为"日志全部消失". 这个警告把静默失败变成响亮的提示. */
+#if (LOG_LEVEL) == 0
+#warning "LOG_LEVEL == 0: 全部日志已关闭. 若非本意, 检查是否误用了 enum 名 LOG_LVL_x (应为 LOG_LEVEL_x)"
 #endif
 
 /* 模块标签 —— 每个 .c 在自己文件顶部 #define, 不定义则用 "APP" */
@@ -71,25 +92,25 @@ typedef enum {
  * 日志宏 (预处理期分级)
  * ================================================================ */
 
-#if LOG_LEVEL >= LOG_LVL_ERROR
+#if LOG_LEVEL >= LOG_LEVEL_ERROR
 #define LOG_E(...)  LOG_Output(LOG_LVL_ERROR, LOG_TAG, __VA_ARGS__)
 #else
 #define LOG_E(...)  ((void)0)
 #endif
 
-#if LOG_LEVEL >= LOG_LVL_WARN
+#if LOG_LEVEL >= LOG_LEVEL_WARN
 #define LOG_W(...)  LOG_Output(LOG_LVL_WARN, LOG_TAG, __VA_ARGS__)
 #else
 #define LOG_W(...)  ((void)0)
 #endif
 
-#if LOG_LEVEL >= LOG_LVL_INFO
+#if LOG_LEVEL >= LOG_LEVEL_INFO
 #define LOG_I(...)  LOG_Output(LOG_LVL_INFO, LOG_TAG, __VA_ARGS__)
 #else
 #define LOG_I(...)  ((void)0)
 #endif
 
-#if LOG_LEVEL >= LOG_LVL_DEBUG
+#if LOG_LEVEL >= LOG_LEVEL_DEBUG
 #define LOG_D(...)  LOG_Output(LOG_LVL_DEBUG, LOG_TAG, __VA_ARGS__)
 #else
 #define LOG_D(...)  ((void)0)

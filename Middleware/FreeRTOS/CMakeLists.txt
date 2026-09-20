@@ -31,4 +31,14 @@ target_include_directories(freertos PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/port/GCC/ARM_CM3     # portmacro.h
 )
 
-# 无外部依赖 — port.c 直接操作 NVIC 寄存器, 不依赖 HAL/CMSIS 头文件路径
+# ---- BSP 头文件路径 ----
+# FreeRTOSConfig.h 里的 configASSERT 收编到了 BSP 的 panic 通道
+# (BSP/Inc/bsp_assert.h), 所以 freertos 需要能看见 BSP 的头文件.
+#
+# 用 PRIVATE: 只供 freertos 自己编译用, 不往 middleware / app 传播 ——
+# 否则每个中间件都会"看得见" BSP, 破坏分层.
+#
+# 注: 这是本工程里 Middleware → BSP 的唯一一条【编译期】依赖边.
+#     链接期的依赖 (bsp_assert.o) 由最终可执行文件统一链接, 此处无需声明.
+#     port.c 本身仍然只操作 NVIC 寄存器, 不依赖 HAL/CMSIS.
+target_include_directories(freertos PRIVATE ${CMAKE_SOURCE_DIR}/BSP/Inc)

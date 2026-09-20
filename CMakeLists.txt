@@ -35,6 +35,29 @@ enable_language(C ASM)
 add_executable(${CMAKE_PROJECT_NAME})
 
 # ================================================================
+# 构建类型相关宏
+#
+# 必须用 add_compile_definitions (目录级) 而非 target_compile_definitions:
+# 可执行目标自己没有源文件 —— 所有 .c 都在 OBJECT 库里 (bsp / app /
+# middleware), 而 PRIVATE 的编译定义不会反向传播给被链接的库.
+# 放在下面 add_subdirectory 之前, 才能覆盖此后创建的所有目标.
+# ================================================================
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    # panic 时停机等调试器看现场 (见 BSP/Src/bsp_assert.c)
+    add_compile_definitions(BSP_ASSERT_HALT)
+else()
+    # 低于 WARN 的日志整条编掉 —— 连格式字符串都不进 Flash
+    # (注意用 LOG_LEVEL_WARN, 不是 enum 名 LOG_LVL_WARN —— 原因见 log.h)
+    add_compile_definitions(LOG_LEVEL=LOG_LEVEL_WARN)
+    # 不定义 BSP_ASSERT_HALT → panic 走 NVIC_SystemReset() 自恢复
+endif()
+
+# 缩短 __FILE__ 与调试信息里的绝对路径 (断言和日志都会用到 __FILE__)
+#   D:/_Study_Cur/.../BSP/Src/bsp_spi.c   →   BSP/Src/bsp_spi.c
+# 每个断言点省约 50 字节; GCC 8+ / AC6 (armclang) 支持, AC5 不支持.
+add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=)
+
+# ================================================================
 # 芯片厂商驱动层 (HAL + CMSIS)
 # ================================================================
 add_subdirectory(cmake/stm32cubemx)

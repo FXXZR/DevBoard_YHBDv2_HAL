@@ -7,9 +7,14 @@
 
 ```bash
 cmake --build build/Debug                          # 增量编译 (默认)
-cmake -B build/Debug -G "Ninja" -DCMAKE_BUILD_TYPE=Debug \
+cmake --build build/Release                        # Release (需先配置, 见下)
+
+cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
   -DCMAKE_TOOLCHAIN_FILE=cmake/gcc-arm-none-eabi.cmake   # 首次配置
 ```
+
+> Debug / Release 是**两套独立**的 build 目录，差异见 [CMakeLists.txt](CMakeLists.txt) 里的构建类型分支。
+> VSCode 快捷键：`Ctrl+Shift+B` 选 BUILD / BUILD (Release)；烧录用 `PYOCD Flash` / `PYOCD Flash (Release)`。
 
 ---
 
@@ -42,7 +47,8 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 - `printf` 与 LOG **共用同一路串口和同一个 TX 环形缓冲** —— `__io_putchar` 在 `log.c`（不在 BSP），端口由 `LOG_Init()` 决定，所以 printf 也是非阻塞的
 - **支持 `%f`**（Debug 构建链接 `-Wl,-u,_printf_float`，约 11KB Flash）。`-Wl,-u,_scanf_float` 已移除，工程不用 scanf 浮点
 - **耦合**：`-u _printf_float` 会拉入 `_vfprintf_r → _write_r → _write` 链路。想彻底禁用 printf 省那 11KB，必须把该 flag、`_write`（[syscalls.c](Start/syscalls.c)）、`__io_putchar`（[log.c](Application/Common/log.c)）**三者一起删**；只删一个会链接失败
-- 级别过滤在**预处理期**完成。Release 加 `-DLOG_LEVEL=LOG_LVL_WARN`，低级别语句整条编掉，连格式串都不进 Flash
+- 级别过滤在**预处理期**完成（已接进 [CMakeLists.txt](CMakeLists.txt) 的 Release 分支）。Release 加 `-DLOG_LEVEL=LOG_LEVEL_WARN`，低级别语句整条编掉，连格式串都不进 Flash
+  - ⚠️ 是 `LOG_LEVEL_WARN`（宏），**不是** `LOG_LVL_WARN`（enum 常量）。`#if` 在预处理期求值，enum 常量那时不存在，会被替换成 0 —— 写成 enum 名会让**全部日志消失**（有 `#warning` 兜底）
 - 前缀格式：`[   13180] W DISP: message`（时间戳 / 级别 / 标签）。启动阶段时间戳来自 DWT 周期计数器（`HAL_GetTick()` 在调度器启动前恒为 0）
 
 **串口归属** —— 每路串口只有一个使用者，应用层不得绕过 BSP 模块直接调 `bsp_usart`：
@@ -80,9 +86,9 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 
 | 技能              | 用途                                                  |
 | ----------------- | ----------------------------------------------------- |
-| `/build-stm32`  | CMake + Ninja 编译 (增量/首次/完全重建/生成HEX)       |
-| `/flash-stm32`  | PyOCD 烧录固件 (`/flash-stm32 safe` = 完整预检模式) |
-| `/reset-stm32`  | 硬件复位 + COM6 串口启动日志捕获                      |
+| `/build-stm32`  | CMake + Ninja 编译 (Debug 默认 / Release / 增量 / 首次 / 完全重建 / 生成HEX) |
+| `/flash-stm32`  | PyOCD 烧录固件 (`release` = 烧 Release 版, `safe` = 完整预检) |
+| `/reset-stm32`  | 硬件复位 + 串口启动日志捕获 (端口自动识别 CH340, 不写死 COM 号) |
 | `/serial-debug` | 实时串口日志监控窗口 (Git Bash tail -f)               |
 
 > 完整 API 参考见 [Document/skills-reference.md](Document/skills-reference.md)
