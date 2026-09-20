@@ -25,23 +25,29 @@ extern "C" {
  * ================================================================ */
 
 typedef enum {
-    BSP_SPI_BUS_1 = 0,      /* SPI1: PA5=SCK, PA6=MISO, PA7=MOSI */
+    BSP_SPI_BUS_1 = 0,      /* SPI1: PA5=SCK, PA6=MISO, PA7=MOSI  (APB2, 72MHz) */
+    BSP_SPI_BUS_2,          /* SPI2: PB13=SCK, PB14=MISO, PB15=MOSI (APB1, 36MHz) */
     BSP_SPI_BUS_COUNT
 } BSP_SPI_Bus_Id_t;
 
 /* ================================================================
  * 波特率预分频 (对应 HAL SPI_BAUDRATEPRESCALER_xxx)
+ *
+ * 实际波特率 = 该总线所在 APB 的时钟 / 分频值, 两条总线差一倍:
+ *     SPI1 (APB2 = 72MHz):  DIV_2 = 36MHz,  DIV_4 = 18MHz,  DIV_8 = 9MHz ...
+ *     SPI2 (APB1 = 36MHz):  DIV_2 = 18MHz,  DIV_4 =  9MHz,  DIV_8 = 4.5MHz ...
+ * 从 SPI1 挪到 SPI2 时, 同一个枚举值实际速度会减半 —— 传参前先确认目标总线.
  * ================================================================ */
 
 typedef enum {
-    BSP_SPI_BAUD_DIV_2   = 0,  /* PCLK/2   = 36 MHz */
-    BSP_SPI_BAUD_DIV_4   = 1,  /* PCLK/4   = 18 MHz (默认) */
-    BSP_SPI_BAUD_DIV_8   = 2,  /* PCLK/8   =  9 MHz */
-    BSP_SPI_BAUD_DIV_16  = 3,  /* PCLK/16  =  4.5 MHz */
-    BSP_SPI_BAUD_DIV_32  = 4,  /* PCLK/32  =  2.25 MHz */
-    BSP_SPI_BAUD_DIV_64  = 5,  /* PCLK/64  =  1.125 MHz */
-    BSP_SPI_BAUD_DIV_128 = 6,  /* PCLK/128 = ~562 KHz */
-    BSP_SPI_BAUD_DIV_256 = 7   /* PCLK/256 = ~281 KHz */
+    BSP_SPI_BAUD_DIV_2   = 0,  /* SPI1: 36 MHz   | SPI2: 18 MHz */
+    BSP_SPI_BAUD_DIV_4   = 1,  /* SPI1: 18 MHz   | SPI2:  9 MHz */
+    BSP_SPI_BAUD_DIV_8   = 2,  /* SPI1:  9 MHz   | SPI2: 4.5 MHz */
+    BSP_SPI_BAUD_DIV_16  = 3,  /* SPI1:  4.5 MHz | SPI2: 2.25 MHz */
+    BSP_SPI_BAUD_DIV_32  = 4,  /* SPI1:  2.25MHz | SPI2: 1.125 MHz */
+    BSP_SPI_BAUD_DIV_64  = 5,  /* SPI1:  1.125MHz| SPI2: ~562 KHz */
+    BSP_SPI_BAUD_DIV_128 = 6,
+    BSP_SPI_BAUD_DIV_256 = 7
 } BSP_SPI_BaudPrescaler_t;
 
 /* ================================================================

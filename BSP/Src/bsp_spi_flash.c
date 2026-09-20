@@ -19,6 +19,7 @@
 
 #include "bsp_spi_flash.h"
 #include "bsp_spi.h"
+#include "bsp_assert.h"
 #include "bsp_systick.h"
 #include "stm32f1xx_hal.h"
 
@@ -98,11 +99,20 @@ static BSP_SPI_FLASH_Status_t s_flash_wait_busy(uint32_t timeout_ms)
 
 /**
  * @brief  单页写入 (≤256B, 不跨页)
- * @note   调用者保证 (addr % 256 + len) ≤ 256。
+ * @note   前端条件 (addr % 256 + len) ≤ 256 由断言强制, 见下。
  */
 static BSP_SPI_FLASH_Status_t s_flash_page_write(const uint8_t *buf, uint32_t addr, uint16_t len)
 {
     if (len == 0) return BSP_SPI_FLASH_OK;
+
+    /* 把"调用者保证"从注释变成跑得起来的检查 —— 注释是给读代码的人看的,
+     * 断言是给跑起来的程序看的.
+     * 跨页写时 W25Q64 会从【页首绕回】覆盖前面的数据, 是 Flash 驱动最经典的
+     * bug 之一, 而且现象是"数据莫名其妙被改了一部分", 极难定位.
+     * 本函数是 static, 唯一调用者 BSP_SPI_FLASH_Write 已按页拆分,
+     * 所以这里违反 == 拆分逻辑写错了. */
+    BSP_ASSERT((addr % BSP_SPI_FLASH_PAGE_SIZE) + (uint32_t)len
+               <= (uint32_t)BSP_SPI_FLASH_PAGE_SIZE);
 
     s_flash_write_enable();
 
@@ -161,7 +171,11 @@ uint32_t BSP_SPI_FLASH_ReadID(void)
 
 void BSP_SPI_FLASH_Read(uint8_t *buf, uint32_t addr, uint32_t len)
 {
-    if (!buf || len == 0) return;
+    BSP_ASSERT(buf != NULL);
+
+    /* 注: 下面两处是【范围检查】而不是编程错误, 保持静默返回 / 状态码.
+     * 若将来确认地址只由代码产生 (不来自外部数据), 也可以提升为断言. */
+    if (len == 0) return;
     if (addr + len > BSP_SPI_FLASH_CAPACITY) return;
 
     FLASH_CS_LOW();
@@ -178,7 +192,9 @@ void BSP_SPI_FLASH_Read(uint8_t *buf, uint32_t addr, uint32_t len)
 
 BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_Write(const uint8_t *buf, uint32_t addr, uint32_t len)
 {
-    if (!buf || len == 0) return BSP_SPI_FLASH_ERROR;
+    BSP_ASSERT(buf != NULL);
+
+    if (len == 0) return BSP_SPI_FLASH_ERROR;
     if (addr + len > BSP_SPI_FLASH_CAPACITY) return BSP_SPI_FLASH_ERROR;
 
     BSP_SPI_FLASH_Status_t ret;
