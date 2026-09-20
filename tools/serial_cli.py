@@ -19,10 +19,13 @@ from datetime import datetime
 
 import serial
 
+from serial_port import resolve_port
+
 
 def main():
     parser = argparse.ArgumentParser(description="Serial CLI for STM32")
-    parser.add_argument("--port", default="COM6")
+    parser.add_argument("--port", default=None,
+                        help="串口号 (如 COM7); 不填则自动识别 CH340")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--send", default=None, help="字符串 (支持 \\r\\n 转义)")
     parser.add_argument("--read", type=float, default=0.5, help="读取等待秒数")
@@ -48,8 +51,12 @@ def main():
             log_file.write(line + "\n")
             log_file.flush()
 
+    port = resolve_port(args.port, log=log)
+    if port is None:
+        sys.exit(1)
+
     try:
-        ser = serial.Serial(args.port, args.baud, timeout=args.timeout, write_timeout=1.0)
+        ser = serial.Serial(port, args.baud, timeout=args.timeout, write_timeout=1.0)
         ser.dtr = False
         ser.rts = False
     except serial.SerialException as e:

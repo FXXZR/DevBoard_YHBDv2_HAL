@@ -13,6 +13,10 @@ build/
 # Reference/temp files (not part of firmware)
 Document/temp/
 
+# Python bytecode cache (tools/ 下的辅助脚本, 属于编译产物不入库)
+__pycache__/
+*.py[cod]
+
 # OS junk files
 .DS_Store
 Thumbs.db

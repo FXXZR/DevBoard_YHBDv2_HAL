@@ -21,10 +21,13 @@ from datetime import datetime
 
 import serial
 
+from serial_port import resolve_port
+
 
 def main():
     parser = argparse.ArgumentParser(description="Reset STM32 and capture boot banner")
-    parser.add_argument("--port", default="COM6")
+    parser.add_argument("--port", default=None,
+                        help="串口号 (如 COM7); 不填则自动识别 CH340")
     parser.add_argument("--baud", type=int, default=115200)
     parser.add_argument("--wait", type=float, default=4.0)
     parser.add_argument("--target", default="stm32f103ze")
@@ -49,10 +52,14 @@ def main():
             log_file.write(line + "\n")
             log_file.flush()
 
-    log(f"capture: Opening {args.port} @ {args.baud} ...")
+    port = resolve_port(args.port, log=log)
+    if port is None:
+        sys.exit(1)
+
+    log(f"capture: Opening {port} @ {args.baud} ...")
 
     try:
-        ser = serial.Serial(args.port, args.baud, timeout=0.05)
+        ser = serial.Serial(port, args.baud, timeout=0.05)
         ser.dtr = False
         ser.rts = False
     except serial.SerialException as e:
