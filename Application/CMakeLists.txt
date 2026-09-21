@@ -3,7 +3,7 @@
 #
 # 目录约定:
 #   main.c              程序入口
-#   Common/              公共类型、宏、数据结构定义
+#   Common/              RTOS 移植钩子（分级日志已上移到 Services/log/）
 #   Modules/             独立硬件模块（每个模块一个子目录）
 #   DataManager/         全局数据管理
 #   Communication/       通信协议栈
@@ -37,8 +37,9 @@ target_sources(app PRIVATE
     # FreeRTOS 移植钩子 (HAL 桥接)
     ${CMAKE_CURRENT_SOURCE_DIR}/Common/rtos_port_hooks.c
 
-    # 分级日志 (基于 bsp_usart TX 环形缓冲)
-    ${CMAKE_CURRENT_SOURCE_DIR}/Common/log.c
+    # 分级日志 (log.c/h) 在 Services/log/ —— 由 services 目标的 PUBLIC include
+    # 传播过来, 这里不需要再列。上移原因: 器件驱动也要打日志, 留在 Application
+    # 会让 Services → Application 成为逆向依赖。
 
     # ---- RTOS 任务 ----
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_init.c
@@ -51,7 +52,6 @@ target_sources(app PRIVATE
 # ---- 头文件路径 ----
 target_include_directories(app PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}            # 根: main.c 所在
-    ${CMAKE_CURRENT_SOURCE_DIR}/Common     # 公共头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/Test       # 测试模块头文件
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks      # RTOS 任务头文件
 )

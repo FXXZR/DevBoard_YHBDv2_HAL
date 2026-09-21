@@ -4,8 +4,9 @@
 # 定位：介于 Application 与 BSP 之间的一层，承载【硬件抽象之上、业务逻辑之下】
 #       的通用能力。
 #
+#   log/      分级日志 —— 基于 bsp_usart 的 TX 环形缓冲, 非阻塞
 #   bus/      总线服务 —— 互斥锁、事务边界 (spi_bus)
-#   devices/  设备服务 —— 具体器件的协议驱动 (w5500_drv, spi_flash_drv)
+#   devices/  设备服务 —— 具体器件的协议驱动 (w5500_drv)
 #
 # 与其他层的关系:
 #   Application ──→ Services ──→ BSP      (向上提供设备/事务 API)
@@ -24,6 +25,7 @@ add_library(services OBJECT)
 
 # ---- 源文件 ----
 target_sources(services PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/log/log.c
     ${CMAKE_CURRENT_SOURCE_DIR}/bus/spi_bus.c
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/w5500_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/w5500_drv.c
@@ -32,6 +34,7 @@ target_sources(services PRIVATE
 # ---- 对外头文件路径 ----
 # 按功能分子目录, 头文件与源文件同目录 (与 Middleware 的约定一致)
 target_include_directories(services PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/log
     ${CMAKE_CURRENT_SOURCE_DIR}/bus
     ${CMAKE_CURRENT_SOURCE_DIR}/devices
 )
