@@ -10,33 +10,54 @@
 - **Build system**: CMake 3.22+ + Ninja
 - **C standard**: C11 (gnu11 extensions)
 - **Output**: `build/Debug/HAL_TEST_Board.elf`
-- **Current firmware size**: ~56KB FLASH, ~6KB RAM (Debug -O0)
+- **Current firmware size**: 315608 B FLASH (60.20%), 55072 B RAM (84.03%) — Debug
 
 ## Architecture
 
-```
-Application/           ← business logic + Test/ 测试模块 + Modules/ 胶水层
-  ├─ Test/             ← 统一测试头 test.h + 各外设测试 .c
-  └─ Modules/          ← 平台胶水层 (fatfs_diskio.c 等)
-    ↓ depends on
-ThirdParty/            ← 第三方中间件 (FatFS, FreeRTOS...)
-    ↓ depends on
-BSP/                   ← board abstraction; ONLY layer that includes HAL
-    ↓ depends on
-Drivers/STM32F1xx_HAL_Driver/  ← ST HAL (全量文件已导入, 按需启用)
-Drivers/CMSIS/                  ← ARM CMSIS + device headers
+四层结构，依赖只允许向下。规范条目见 [conventions.md](conventions.md#分层规则-layering-rule)。
 
-Start/                ← startup, linker script, syscalls, ISR stubs
-cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注释)
+```
+Application/                业务逻辑、RTOS 任务、移植钩子
+  ├─ Common/                rtos_port_hooks.c (FreeRTOS 移植钩子)
+  ├─ Tasks/                 task_init / led / disp / w5500
+  └─ Test/                  各外设验证 .c + 统一测试头 test.h
+      ↓ depends on
+Services/                   硬件抽象之上、业务逻辑之下
+  ├─ log/                   分级日志 (log.c/h, 基于 bsp_usart TX 环形缓冲)
+  ├─ bus/                   SPI 总线互斥锁 (spi_bus)
+  └─ devices/               器件驱动 + 第三方库移植层 (w5500_drv / w5500_port)
+      ↓ depends on
+{ Middleware/,  BSP/ }      ← 平级, 互不依赖
+  Middleware/               第三方库, 只读
+    ├─ FreeRTOS/            V11.3.0  (config/ + port/)
+    ├─ FatFs/               R0.15a    (Source/ + config/ + port/)
+    ├─ lvgl-8.3.11/         LVGL      (src/ + port/)
+    └─ ioLibrary/           WIZnet W5500 硬件 TCP/IP 协议栈
+  BSP/                      板级硬件资源 + raw 传输; 唯一 include HAL 的层
+      ↓ depends on
+Drivers/STM32F1xx_HAL_Driver/    ST HAL (全量导入, 按需启用)
+Drivers/CMSIS/                   ARM CMSIS + device headers
+
+Start/                   startup, linker script, syscalls, ISR stubs
+cmake/stm32cubemx/       HAL/CMSIS CMake glue (源文件按外设分组 + 注释)
 ```
 
-**Layering rule**: Application code NEVER includes HAL peripheral headers directly. Includes `test.h` for test functions, BSP headers for hardware access. `stm32f1xx_hal.h` is allowed for basics like `HAL_GetTick()`.
+CMake 目标与依赖：
+
+| target | 类型 | 依赖 |
+| ------ | ---- | ---- |
+| `iolibrary` | OBJECT | 无（通过注册回调访问硬件） |
+| `fatfs` | OBJECT | `bsp` |
+| `lvgl` | OBJECT | 无（include 路径直指 `BSP/Inc`） |
+| `bsp` | OBJECT | HAL |
+| `services` | OBJECT | `bsp` `middleware` |
+| `app` | OBJECT | `middleware` `bsp` `services` |
 
 ## Key Files
 
 | File                                     | Role                                                                   |
 | ---------------------------------------- | ---------------------------------------------------------------------- |
-| `Application/main.c`                   | `main()`: 初始化 → Banner → 调用一个 test 函数                     |
+| `Application/main.c`                   | `main()`: BSP 初始化 → LOG → 外部 SRAM → W5500 自检 → 启动调度器       |
 | `Application/Test/test.h`              | 统一测试头, 聚合所有 BSP + 声明所有测试函数                            |
 | `Application/Test/test_beep_key.c`     | BEEP+KEY 联动: KEY1 按下 → 蜂鸣 200ms                                 |
 | `Application/Test/test_key.c`          | KEY 扫描: KEY1→LED_R, KEY2→LED_G, printf 状态                        |
@@ -67,8 +88,16 @@ cmake/stm32cubemx/    ← HAL/CMSIS CMake glue (源文件按外设分组 + 注�
 | `BSP/Src/bsp_spi_flash.c`              | SPI Flash 实现: CS=PA4, 页写/扇区擦/块擦/全片擦, 轮询 BUSY             |
 | `BSP/Inc/bsp_sdcard.h`                 | SD Card:`BSP_SDCARD_Init/Read/Write/GetInfo/IsReady` — SDIO DMA     |
 | `BSP/Src/bsp_sdcard.c`                 | SD Card 实现: HW映射表+DMA+ISR+MSP全自包含, 阻塞式扇区读写             |
-| `ThirdParty/FatFs/`                    | FatFS R0.15a —`ff.c/h`, `ffconf.h`, `diskio.h` (核心库)         |
-| `Application/Modules/fatfs_diskio.c`   | FatFS 平台胶水层 —`disk_read/write/ioctl` → BSP                    |
+| `Middleware/FatFs/Source/`             | FatFS R0.15a 上游源码 (`ff.c/h`, `diskio.h`), 只读                     |
+| `Middleware/FatFs/port/diskio.c`       | FatFS 平台胶水层 — `disk_read/write/ioctl` → BSP                       |
+| `BSP/Inc/bsp_w5500_hw.h`               | W5500 板级: CS=PG9 / RST=PG15 / INT=PG8, 复位时序                      |
+| `BSP/Src/bsp_w5500_hw.c`               | W5500 板级实现 + SPI2 初始化 (PB13/14/15, 模式 3)                      |
+| `Services/log/log.h` `log.c`           | 分级日志 — 预处理期分级, DWT 补启动阶段时间戳                          |
+| `Services/bus/spi_bus.h` `spi_bus.c`   | SPI 总线互斥锁 — 锁的边界 = CS 的边界                                  |
+| `Services/devices/w5500_drv.c`         | W5500 上电 / 通路校验 / PHY 配置                                       |
+| `Services/devices/w5500_port.c`        | ioLibrary 移植层 — 注册 CS/SPI/临界区回调 (含总线锁)                   |
+| `Middleware/ioLibrary/`                | WIZnet 官方 W5500 硬件 TCP/IP 协议栈, MIT, 只读                        |
+| `Application/Tasks/task_w5500.c`       | W5500 链路监控 — 1Hz 轮询 PHYCFGR                                      |
 | `Start/startup_stm32f103xe.s`          | Vector table, Reset_Handler                                            |
 | `Start/STM32F103XX_FLASH.ld`           | Linker script — memory regions + sections                             |
 | `Start/stm32f1xx_hal_conf.h`           | HAL module enable/disable switches                                     |
@@ -195,41 +224,41 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 ## Project Directory Intent
 
-| Directory                      | Purpose                                                |
-| ------------------------------ | ------------------------------------------------------ |
-| `Application/Test/`          | 外设测试模块 (test.h + 各外设测试 .c)                  |
-| `Application/Config/`        | App configuration (empty — future)                    |
-| `Application/Common/`        | Shared types/macros (empty — future)                  |
-| `Application/Modules/`       | Hardware driver modules + 平台胶水层 (fatfs_diskio 等) |
-| `Application/DataManager/`   | Global state management (empty — future)              |
-| `Application/Communication/` | Protocol stacks (empty — future)                      |
-| `Application/Tasks/`         | RTOS task organization (empty — future)               |
-| `ThirdParty/`                | Middleware: FatFS, FreeRTOS, ... (各自有 CMakeLists)   |
-| `Services/`                  | Platform services (empty — future)                    |
+| Directory | Purpose |
+| --------- | ------- |
+| `Application/Tasks/` | RTOS 任务 (task_init / led / disp / w5500) |
+| `Application/Common/` | FreeRTOS 移植钩子 (`rtos_port_hooks.c`) |
+| `Application/Test/` | 外设验证模块 (`test.h` + 各外设 .c) |
+| `Application/DataManager/` | 全局状态管理 (空 — 预留) |
+| `Application/Communication/` | 协议栈 (空 — 预留) |
+| `Application/Modules/` | 空 — 平台胶水层已并入 `Services/devices/` |
+| `Services/log/` | 分级日志 |
+| `Services/bus/` | 总线服务 — 锁 / 事务边界 |
+| `Services/devices/` | 器件驱动 + 第三方库移植层 |
+| `Middleware/` | 第三方库: FreeRTOS / FatFs / LVGL / ioLibrary (各自 CMakeLists) |
+| `BSP/` | 板级硬件资源 + raw 传输 |
+| `Start/` | startup, linker script, syscalls, ISR stubs |
+| `Document/` | 本目录 — 规范与参考 |
 
-## Firmware Size (Debug -O0)
+## Firmware Size (Debug, `-O0 -g3`)
 
-| Category                 | ~Size           | Notes                                                     |
-| ------------------------ | --------------- | --------------------------------------------------------- |
-| HAL UART                 | 3.5KB           | IRQHandler, Abort, Transmit, config helpers               |
-| HAL RCC                  | 2.5KB           | OscConfig, ClockConfig, PeriphCLKConfig                   |
-| HAL RTC                  | 2.3KB           | Init, Set/Get Time/Date, BKUP, DateUpdate, WeekDayNum     |
-| newlib nano              | 2.0KB           | _printf_i, _vfprintf_r, _printf_common, _malloc_r         |
-| Test code                | 1.7KB           | cmd_execute, cmd_feed, parse functions                    |
-| HAL GPIO                 | 1.2KB           | Init, DeInit                                              |
-| BSP modules              | ~2KB            | usart, rtc, led, beep, key, adc, systick                  |
-| HAL DMA                  | 0.5KB           | Abort_IT                                                  |
-| HAL ADC                  | 0.3KB           | Init (only used functions)                                |
-| Startup + vectors        | ~3KB            | startup, system_stm32f1xx, syscalls                       |
-| Other (const data, etc.) | ~5KB            | rodata, interrupt vectors, etc.                           |
-| FatFS core               | ~12KB           | ff.c (FF_USE_LFN=0, FF_USE_MKFS=1)                        |
-| HAL SD                   | ~3.5KB          | Init, InitCard, Read/Write Blocks, DMA, IRQ               |
-| BSP SD Card              | ~2KB            | CMD16+Polling+DMA+MSP+ISR, SDSC: HW块→512B转换+CMD13轮询 |
-| Test SD+FatFS            | ~1KB            | test_sdcard_fatfs.c (auto f_mkfs FAT32)                   |
-| diskio glue              | ~0.5KB          | FatFS ↔ BSP bridge                                       |
-| **Total**          | **~56KB** |                                                           |
+最近一次实测（链接器 region 输出）：
 
-Debug -O0 is typically 2-3× larger than Release -Os.
+| Region | Used | Total | % |
+| ------ | ---- | ----- | - |
+| FLASH | 315608 B | 512 KB | 60.20% |
+| RAM | 55072 B | 64 KB | 84.03% |
+
+分阶段（FLASH）：
+
+| 阶段 | FLASH |
+| ---- | ----- |
+| BSP + HAL + FreeRTOS + LVGL | 306012 B |
+| + ioLibrary vendor（无代码引用，归档成员不被抽出） | 306012 B |
+| + Services 层 + W5500 接入 | 315608 B |
+
+> ⚠️ 内部 RAM 已用 84%。新增任务或缓冲区前先确认余量（`arm-none-eabi-size` 的 `bss` 是主要占用）。
+> Release 为 `-Os -g0`，通常显著小于 Debug。
 
 ## Debug
 
