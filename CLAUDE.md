@@ -24,6 +24,21 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `test.h` 获取测试函数，通过 BSP 头文件访问硬件。
 
+**四层结构** —— 依赖只允许向下，不允许成环：
+
+| 层 | 放什么 | 不许放什么 |
+| --- | --- | --- |
+| `Application/` | 业务逻辑、RTOS 任务、移植钩子 | 直接调 HAL |
+| `Services/` | `bus/` 总线服务（锁/事务边界）；`devices/` 器件协议驱动 | 业务逻辑 |
+| `Middleware/` | 第三方库（FreeRTOS / FatFs / LVGL / ioLibrary）—— **只读** | 项目自己的代码 |
+| `BSP/` | 板级硬件资源、raw 传输 | RTOS API、第三方库 |
+
+三条硬性约定：
+
+- **BSP 不得依赖 RTOS**（逆向依赖）。需要锁的场景（如 SPI 总线互斥）由 `Services/bus` 提供，BSP 只管"怎么发一个字节"
+- **Services 可以直接用 FreeRTOS，但只允许出现在 `.c` 里** —— 头文件不得出现 FreeRTOS 类型，避免向上下两个方向泄漏。**不做 OSAL 包装**：换 RTOS 时领域和需求都会大变，抽象层保不住，与其维护一层改名转发，不如把模块本身做通用
+- **第三方库的移植层（回调实现）放 `Services/devices/`**，不放 Middleware —— 否则 Middleware 要反向依赖 BSP。ioLibrary 的 `reg_wizchip_*_cbfunc` 就是这么接的（见 [w5500_port.c](Services/devices/w5500_port.c)）
+
 ### 宏使用规范
 
 - 错误码/状态码: ❌ `#define` → ✅ `typedef enum`
@@ -99,7 +114,7 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 
 `main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → 启动 FreeRTOS 调度器。
 
-当前跑两个任务：`vLedTask`（心跳）与 `vDispTask`（LVGL 显示 + 触摸校准）。外设验证测试已移出构建，见下方"日志与串口"。
+当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vW5500Task`（W5500 链路监控，1Hz 轮询 PHYCFGR）。外设验证测试已移出构建，见下方"日志与串口"。
 
 ---
 

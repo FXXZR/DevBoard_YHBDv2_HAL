@@ -80,6 +80,14 @@ add_subdirectory(BSP)
 add_subdirectory(Middleware)
 
 # ================================================================
+# Services — 平台服务层
+#   总线服务 (锁/事务) + 设备服务 (器件的协议驱动)
+#   位于 BSP 之上、Application 之下; 依赖 BSP 与 Middleware,
+#   所以必须排在两者之后。
+# ================================================================
+add_subdirectory(Services)
+
+# ================================================================
 # Application — 应用层（业务逻辑）
 # ================================================================
 add_subdirectory(Application)
@@ -117,6 +125,7 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
     start
     middleware
     bsp
+    services
     app
 
     # Add user defined libraries

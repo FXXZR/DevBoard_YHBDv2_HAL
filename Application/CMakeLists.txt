@@ -45,6 +45,7 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_disp.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_w5500.c
 )
 
 # ---- 头文件路径 ----
@@ -56,5 +57,6 @@ target_include_directories(app PUBLIC
 )
 
 # ---- 依赖 ----
-# app 通过 middleware 获得 ff.h 等头文件; 通过 bsp 获得硬件抽象
-target_link_libraries(app PUBLIC middleware bsp)
+# app 通过 middleware 获得 ff.h 等头文件; 通过 bsp 获得硬件抽象;
+# 通过 services 获得总线/设备服务 (锁、事务、器件驱动)
+target_link_libraries(app PUBLIC middleware bsp services)

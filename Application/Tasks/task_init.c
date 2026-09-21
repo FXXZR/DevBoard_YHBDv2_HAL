@@ -6,6 +6,8 @@
 #include "task_led.h"
 #include "task_test.h"
 #include "task_disp.h"
+#include "task_w5500.h"
+#include "spi_bus.h"
 #include <stddef.h>   /* NULL */
 
 /* ================================================================
@@ -46,6 +48,17 @@ static const TaskDef_t task_list[] = {
         .p_handle    = NULL,
         .pv_params   = NULL,
     },
+    {
+        /* W5500 链路监控: 每秒读一次 PHYCFGR, 值变化打日志.
+         * 栈给 512 (含 vsnprintf, 见 log.c) —— 256 对带格式化的日志偏紧.
+         * 优先级 1: 低频诊断任务, 不参与实时性. */
+        .name        = "w5500",
+        .func        = vW5500Task,
+        .stack_depth = 512,
+        .priority    = 1,
+        .p_handle    = NULL,
+        .pv_params   = NULL,
+    },
 };
 
 /* ================================================================
@@ -55,6 +68,12 @@ static const TaskDef_t task_list[] = {
 static void vStartTask(void *pvParameters)
 {
     (void) pvParameters;
+
+    /* 总线锁必须在【任何子任务被创建之前】建好。
+     * 放在这里而不是 main(): 本任务优先级仅次于定时器任务, 调度器一启动
+     * 就抢占运行, 且在它自删除之前没有任何子任务存在 —— 不存在"任务已经
+     * 在跑、锁却还没建"的窗口。那种窗口导致的 bug 是偶发的, 极难查。 */
+    SpiBus_Init();
 
     for (size_t i = 0; i < sizeof(task_list) / sizeof(task_list[0]); i++) {
         const TaskDef_t *def = &task_list[i];

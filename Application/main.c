@@ -27,6 +27,7 @@
 #include "bsp_led.h"
 #include "bsp_usart.h"
 #include "bsp_sram.h"
+#include "w5500_drv.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "task_init.h"
@@ -78,6 +79,26 @@ int main(void) {
     LOG_I("========== HAL_TEST_Board / STM32F103ZET6 ==========");
     LOG_I("sysclk 72MHz, log on USART1 @115200 (ring buffer + DMA)");
     LOG_D("如果你看到这行, 说明 DEBUG 级别已启用");
+
+    /* ---- W5500 以太网通路自检 (八周计划 W1 交付物) ----
+     * 复位时序 + 读 VERSIONR, 期望 0x04 —— 读回值本身就是通路测试,
+     * 不需要示波器. 失败时按状态码区分"总线无响应"和"版本不对",
+     * 两者的排查方向完全不同 (接线 vs 芯片型号).
+     * 注: 内部含约 500ms 复位等待, 只在启动时走一次. */
+    {
+        W5500_Status_t w5500_st  = W5500_Drv_Init();
+        uint8_t        w5500_ver = W5500_Drv_ReadVersion();
+
+        if (w5500_st == W5500_OK) {
+            /* PHYCFGR 打原始值: 此刻自协商还没完成 (要 1~2 秒),
+             * 所以这里多半是 0xFA, 稍后由 vW5500Task 报出 0xFF */
+            LOG_I("W5500 ok, VERSIONR=0x%02X, PHYCFGR=0x%02X",
+                  w5500_ver, W5500_Drv_ReadPhyCfg());
+        } else {
+            LOG_E("W5500 init failed: %s (VERSIONR=0x%02X)",
+                  W5500_Drv_StatusStr(w5500_st), w5500_ver);
+        }
+    }
 
     /* ---- 启动前心跳: RGB 三色依次亮灭 ---- */
     BSP_LED_On(BSP_LED_R);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_R);

@@ -31,6 +31,7 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_ap3216c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi_flash.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_w5500_hw.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sdcard.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_rs485.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_esp8266.c
