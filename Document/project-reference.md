@@ -10,7 +10,7 @@
 - **Build system**: CMake 3.22+ + Ninja
 - **C standard**: C11 (gnu11 extensions)
 - **Output**: `build/Debug/HAL_TEST_Board.elf`
-- **Current firmware size**: 315608 B FLASH (60.20%), 55072 B RAM (84.03%) — Debug
+- **Current firmware size**: 315600 B FLASH (60.20%), 55072 B RAM (84.03%) — Debug
 
 ## Architecture
 
@@ -25,13 +25,14 @@ Application/                业务逻辑、RTOS 任务、移植钩子
 Services/                   硬件抽象之上、业务逻辑之下
   ├─ log/                   分级日志 (log.c/h, 基于 bsp_usart TX 环形缓冲)
   ├─ bus/                   SPI 总线互斥锁 (spi_bus)
-  └─ devices/               器件驱动 + 第三方库移植层 (w5500_drv / w5500_port)
+  └─ devices/               器件驱动 + 第三方库移植层
+                            (w5500_drv / w5500_port / diskio / lvgl_port)
       ↓ depends on
 { Middleware/,  BSP/ }      ← 平级, 互不依赖
-  Middleware/               第三方库, 只读
-    ├─ FreeRTOS/            V11.3.0  (config/ + port/)
-    ├─ FatFs/               R0.15a    (Source/ + config/ + port/)
-    ├─ lvgl-8.3.11/         LVGL      (src/ + port/)
+  Middleware/               第三方库源码与配置, 只读 (移植层不在这一层)
+    ├─ FreeRTOS/            V11.3.0  (config/ + port/, port 为上游自带)
+    ├─ FatFs/               R0.15a    (Source/ + config/)
+    ├─ lvgl-8.3.11/         LVGL      (src/ + lv_conf.h)
     └─ ioLibrary/           WIZnet W5500 硬件 TCP/IP 协议栈
   BSP/                      板级硬件资源 + raw 传输; 唯一 include HAL 的层
       ↓ depends on
@@ -47,10 +48,10 @@ CMake 目标与依赖：
 | target | 类型 | 依赖 |
 | ------ | ---- | ---- |
 | `iolibrary` | OBJECT | 无（通过注册回调访问硬件） |
-| `fatfs` | OBJECT | `bsp` |
-| `lvgl` | OBJECT | 无（include 路径直指 `BSP/Inc`） |
+| `fatfs` | OBJECT | 无（`diskio.c` 已移至 `services`） |
+| `lvgl` | OBJECT | 无（include 路径直指 `BSP/Inc`，供 `lv_conf.h` 取 SRAM 地址常量） |
 | `bsp` | OBJECT | HAL |
-| `services` | OBJECT | `bsp` `middleware` |
+| `services` | OBJECT | `bsp` `middleware`（`diskio` / `lvgl_port` 在此编译） |
 | `app` | OBJECT | `middleware` `bsp` `services` |
 
 ## Key Files
@@ -89,13 +90,14 @@ CMake 目标与依赖：
 | `BSP/Inc/bsp_sdcard.h`                 | SD Card:`BSP_SDCARD_Init/Read/Write/GetInfo/IsReady` — SDIO DMA     |
 | `BSP/Src/bsp_sdcard.c`                 | SD Card 实现: HW映射表+DMA+ISR+MSP全自包含, 阻塞式扇区读写             |
 | `Middleware/FatFs/Source/`             | FatFS R0.15a 上游源码 (`ff.c/h`, `diskio.h`), 只读                     |
-| `Middleware/FatFs/port/diskio.c`       | FatFS 平台胶水层 — `disk_read/write/ioctl` → BSP                       |
+| `Services/devices/diskio.c`            | FatFs 平台胶水层 — `disk_read/write/ioctl` → BSP                       |
 | `BSP/Inc/bsp_w5500_hw.h`               | W5500 板级: CS=PG9 / RST=PG15 / INT=PG8, 复位时序                      |
 | `BSP/Src/bsp_w5500_hw.c`               | W5500 板级实现 + SPI2 初始化 (PB13/14/15, 模式 3)                      |
 | `Services/log/log.h` `log.c`           | 分级日志 — 预处理期分级, DWT 补启动阶段时间戳                          |
 | `Services/bus/spi_bus.h` `spi_bus.c`   | SPI 总线互斥锁 — 锁的边界 = CS 的边界                                  |
 | `Services/devices/w5500_drv.c`         | W5500 上电 / 通路校验 / PHY 配置                                       |
 | `Services/devices/w5500_port.c`        | ioLibrary 移植层 — 注册 CS/SPI/临界区回调 (含总线锁)                   |
+| `Services/devices/lvgl_port.c` `h`     | LVGL 移植层 — 显示 flush (DMA) + 触摸读取回调挂接                      |
 | `Middleware/ioLibrary/`                | WIZnet 官方 W5500 硬件 TCP/IP 协议栈, MIT, 只读                        |
 | `Application/Tasks/task_w5500.c`       | W5500 链路监控 — 1Hz 轮询 PHYCFGR                                      |
 | `Start/startup_stm32f103xe.s`          | Vector table, Reset_Handler                                            |
@@ -246,7 +248,7 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 | Region | Used | Total | % |
 | ------ | ---- | ----- | - |
-| FLASH | 315608 B | 512 KB | 60.20% |
+| FLASH | 315600 B | 512 KB | 60.20% |
 | RAM | 55072 B | 64 KB | 84.03% |
 
 分阶段（FLASH）：
@@ -256,6 +258,7 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | BSP + HAL + FreeRTOS + LVGL | 306012 B |
 | + ioLibrary vendor（无代码引用，归档成员不被抽出） | 306012 B |
 | + Services 层 + W5500 接入 | 315608 B |
+| + FatFs/LVGL 移植层迁入 Services（代码未增减，段排布位移） | 315600 B |
 
 > ⚠️ 内部 RAM 已用 84%。新增任务或缓冲区前先确认余量（`arm-none-eabi-size` 的 `bss` 是主要占用）。
 > Release 为 `-Os -g0`，通常显著小于 Debug。

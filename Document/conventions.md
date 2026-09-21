@@ -79,11 +79,12 @@ Application/  →  Services/  →  { Middleware/, BSP/ }  →  Drivers/HAL
 
   | 内容 | 作者 | 归属 |
   |------|------|------|
-  | `ffconf.h`、`_WIZCHIP_=` 编译定义 | 第三方库自己的开关 | `Middleware/` |
-  | `diskio.c`、`w5500_port.c` | 我们对着本工程硬件写的 | `Services/devices/` |
+  | `ffconf.h`、`lv_conf.h`、`_WIZCHIP_=` 编译定义 | 第三方库自己的开关 | `Middleware/` |
+  | `diskio.c`、`w5500_port.c`、`lvgl_port.c` | 我们对着本工程硬件写的 | `Services/devices/` |
 
-> **现状**：ioLibrary 已合规。FatFs 的 `Middleware/FatFs/port/diskio.c` 与
-> LVGL 的 `Middleware/lvgl-8.3.11/port/lvgl_port.c` 尚未迁移，待整理。
+> **现状**：ioLibrary / FatFs / LVGL 三者的移植层均已迁到 `Services/devices/`，
+> `Middleware/` 下只剩上游源码与配置。（FreeRTOS 的 `Middleware/FreeRTOS/port/`
+> 是上游自带的可移植层，与这里说的移植胶水不是一回事，保持原位。）
 
 ## 宏使用规范 (Macro Usage Rules)
 

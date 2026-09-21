@@ -3,6 +3,9 @@
 /*-----------------------------------------------------------------------*/
 /* This is a glue layer that bridges FatFs to the BSP SD Card driver.    */
 /* Drive 0 = SD Card (BSP_SDCARD).                                       */
+/*                                                                        */
+/* 归 Services/devices/ 而非 Middleware/FatFs —— 它调 BSP, 放 Middleware  */
+/* 会让 Middleware 反向依赖 BSP。FatFs 侧只留上游源码与 ffconf.h。        */
 /*-----------------------------------------------------------------------*/
 
 #include "diskio.h"

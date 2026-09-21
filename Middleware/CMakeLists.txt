@@ -5,13 +5,15 @@
 #   <Middleware>/
 #     ├── CMakeLists.txt   # 独立库目标
 #     ├── Source/ 或 Include/ + Source/  # 第三方源码 (只读)
-#     ├── port/            # 移植胶水
 #     └── config/          # 项目定制配置
+#
+# 本层只有第三方源码与配置, 不含移植层 —— 移植层调 BSP, 放在
+# Services/devices/ (否则 Middleware 要反向依赖 BSP)。
 #
 # 新增中间件: 新建目录 → 编写 CMakeLists.txt → 在此 add_subdirectory
 # ================================================================
 
-# ---- FatFs (R0.15a) + SD Card 移植 ----
+# ---- FatFs (R0.15a) ----
 add_subdirectory(FatFs)
 
 # ---- FreeRTOS (V11.3.0) ----

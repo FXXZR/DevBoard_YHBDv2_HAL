@@ -11,6 +11,9 @@
  * 触摸事件流:
  *   EXTI 边沿置位 TouchFlag (按下瞬间) + IRQ 电平持续检测 (按住期间)
  *   → BSP_XPT2046_GetTouchPoint() 获取校准后像素坐标 → 喂给 LVGL
+ *
+ * 归属: Services/devices/ —— 移植层要调 BSP, 放进 Middleware/lvgl 会让
+ *       Middleware 反向依赖 BSP。
  */
 #include "lvgl_port.h"
 #include "bsp_lcd_ili9341.h"
