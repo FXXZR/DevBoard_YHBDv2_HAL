@@ -14,6 +14,7 @@
 
 #include "bsp_lcd_ili9341.h"
 #include "bsp_fonts.h"
+#include "bsp_systick.h"
 #include "stm32f1xx_hal.h"
 
 /* ================================================================
@@ -119,9 +120,23 @@ static __inline uint16_t lcd_read_data(void)
     return *(__IO uint16_t *)FSMC_LCD_DATA_ADDR;
 }
 
-static void lcd_delay(__IO uint32_t n)
+/* ================================================================
+ * 
+ * lcd_delay采用注册形式，请自行实现阻塞延时，建议是基于定时器实现的准确阻塞。
+ * 不要用空转 NOP 循环，因为空转循环的耗时取决于指令取指时序, 
+ * 会随本文件在 Flash 中的地址漂移而改变,导致面板复位时序不稳定，进而异常翻转
+ * ================================================================ */
+
+/* 面板复位/唤醒时序 (ILI9341 手册) */
+enum {
+    LCD_RESET_LOW_MS  = 10,     /* 复位低电平 — 手册下限 10us, 取宽裕值 */
+    LCD_RESET_WAIT_MS = 120,    /* 复位释放后 */
+    LCD_SLEEP_OUT_MS  = 120,    /* Sleep Out 之后 */
+};
+
+static __inline void lcd_delay(uint32_t delay_ms)
 {
-    for (; n != 0; n--) { }
+    BSP_SYSTICK_DelayMS(delay_ms);
 }
 
 /* ================================================================
@@ -232,9 +247,9 @@ static void lcd_init_fsmc(void)
 static void lcd_hw_reset(void)
 {
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_RESET);
-    lcd_delay(0xAFF);
+    lcd_delay(LCD_RESET_LOW_MS);
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_SET);
-    lcd_delay(0xAFF);
+    lcd_delay(LCD_RESET_WAIT_MS);
 }
 
 /* ================================================================
@@ -339,7 +354,7 @@ static void lcd_reg_config_ili9341(void)
 
     /* Sleep Out (11h) */
     lcd_write_cmd(0x11);
-    lcd_delay(0xAFF << 2);
+    lcd_delay(LCD_SLEEP_OUT_MS);
 
     /* Display ON (29h) */
     lcd_write_cmd(0x29);
@@ -421,7 +436,7 @@ static void lcd_reg_config_st7789v(void)
     lcd_write_data(0x1C); lcd_write_data(0x1D);
 
     lcd_write_cmd(0x11);
-    lcd_delay(0xAFF << 2);
+    lcd_delay(LCD_SLEEP_OUT_MS);
 
     lcd_write_cmd(0x29);
     lcd_write_cmd(0x2C);
@@ -487,13 +502,11 @@ void BSP_LCD_Init(void)
         lcd_reg_config_ili9341();
     }
 
-    /* 7. 默认扫描方向 — SCAN_6
-     *    成像方向会随固件布局整体漂移: 同一份源码, 只要二进制的布局变一点,
-     *    方向就可能 180° 翻转. SCAN_6 只是针对【当前布局】的实测取值,
-     *    不是对 MADCTL 语义的修正 —— 换个布局它可能就反了.
-     *    改动本行前后务必实机确认方向; 完整证据链见 bsp_lcd_ili9341.h 的
-     *    枚举注释与 Document/project-reference.md. */
-    BSP_LCD_SetScanMode(BSP_LCD_SCAN_6);
+    /* 7. 默认扫描方向 — SCAN_0
+     *    原值是 SCAN_6, 那是迁就"成像方向随固件布局翻转"的旧行为实测选出的,
+     *    不是对 MADCTL 语义的修正. 该 bug 已定位并修复 (见本文件延时小节),
+     *    方向不再随布局变, SCAN_0 是正确的常量. */
+    BSP_LCD_SetScanMode(BSP_LCD_SCAN_0);
 
     /* 8. 清屏为黑色 */
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);

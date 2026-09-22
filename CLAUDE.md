@@ -110,3 +110,4 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 | [project-reference.md](Document/project-reference.md) | 架构图、Key Files 清单、Pin Map、Clock Tree、HAL 模块表、Memory Layout、Build Flags、目录规划、Firmware Size、Debug 配置 |
 | [conventions.md](Document/conventions.md)             | 完整编码规范 (宏/API/分层/初始化/Git)                                                                                    |
 | [skills-reference.md](Document/skills-reference.md)   | 技能详细 API 参考                                                                                                        |
+| [issue-log.md](Document/issue-log.md)                 | 疑难问题记录 —— 已定位根因的问题: 现象/根因/修复/排查方法教训 (含"已排除"清单, 避免重走)                                    |

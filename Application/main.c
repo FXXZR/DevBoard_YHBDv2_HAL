@@ -69,8 +69,7 @@ int main(void) {
     LOG_Init(BSP_USART1);
 
     /* 外部 SRAM 初始化 — 必须在进入 RTOS 前完成
-     * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪
-     * 注: 屏幕成像方向会随固件布局漂移, 详见 bsp_lcd_ili9341.h 枚举注释 */
+     * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪 */
     BSP_SRAM_Init();
     LOG_I("external SRAM ready (LVGL mem pool)");
 
