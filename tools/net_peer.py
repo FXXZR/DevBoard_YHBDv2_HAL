@@ -100,31 +100,40 @@ def serve_tcp(args):
         srv.listen(1)
         print(f"[tcp] listening on {args.host}:{args.port}  mode={args.mode}", flush=True)
 
-        conn, peer = srv.accept()
-        print(f"[tcp] connected from {peer[0]}:{peer[1]}", flush=True)
+        # 一轮连接结束后继续 accept —— 板子会反复连 (重连测试、多轮往返),
+        # 只 accept 一次的话第二轮就没人监听了, 现象是"连接超时"。
+        while True:
+            conn, peer = srv.accept()
+            print(f"[tcp] connected from {peer[0]}:{peer[1]}", flush=True)
 
-        stats = Stats()
-        with conn:
-            if args.mode == "stall":
-                # 一个字节都不读 —— 接收窗口很快被填满, 板子那边的 send 会先成功
-                # 若干次然后卡住。这是"对端不消费"的唯一复现方式: 读了就不算了。
-                print("[tcp] stall: 不读本连接, 观察对端何时发不动 (Ctrl-C 结束)", flush=True)
-                while True:
-                    time.sleep(1)
-                    stats.tick()
-            else:
-                while True:
-                    data = conn.recv(args.bufsize)
-                    if not data:
-                        print("[tcp] peer closed", flush=True)
-                        break
-                    stats.add(rx=len(data), rx_chunks=1)
-                    if args.mode == "echo":
-                        conn.sendall(data)
-                        stats.add(tx=len(data), tx_chunks=1)
-
-        print("[tcp] final:", end=" ", flush=True)
-        stats.line("total")
+            stats = Stats()
+            with conn:
+                if args.mode == "stall":
+                    # 一个字节都不读 —— 接收窗口很快被填满, 板子那边的 send 会先
+                    # 成功若干次然后卡住。这是"对端不消费"的唯一复现方式:
+                    # 读了就不算了。
+                    print("[tcp] stall: 不读本连接 (Ctrl-C 结束)", flush=True)
+                    while True:
+                        time.sleep(1)
+                        stats.tick()
+                else:
+                    try:
+                        while True:
+                            data = conn.recv(args.bufsize)
+                            if not data:
+                                print("[tcp] peer closed, 本连接统计:", end=" ", flush=True)
+                                stats.line("total")
+                                break
+                            stats.add(rx=len(data), rx_chunks=1)
+                            if args.mode == "echo":
+                                conn.sendall(data)
+                                stats.add(tx=len(data), tx_chunks=1)
+                    except OSError as e:
+                        # 板子被复位 / 拔网线时这里【必然】报错 (WinError 10053/10054)。
+                        # 对端复不复位不归 PC 管, 所以这是常态而非异常 —— 让它把
+                        # 整个 server 带走的话, 下次上电就没人监听了, 现象是
+                        # "板子连不上", 查半天查到工具自己身上。
+                        print(f"[tcp] 连接中断 ({e}), 继续监听", flush=True)
 
 
 def run_client(args):

@@ -21,6 +21,10 @@
 #include "bsp_spi.h"
 #include "bsp_w5500_hw.h"
 #include "bsp_assert.h"
+#include "bsp_systick.h"
+
+#define LOG_TAG "W5500"
+#include "log.h"
 
 #include "wizchip_conf.h"       /* ioLibrary 的移植层接口 */
 
@@ -30,9 +34,15 @@
 
 #define W5500_SPI_BUS               BSP_SPI_BUS_2
 
-/* SPI 传输超时 (单字节与 burst 共用). 18MHz 下一字节约 0.44us, 2KB 事务
- * 纯线速也只有 0.91ms —— 10ms已经够多了 */
-#define W5500_SPI_TIMEOUT_MS        10
+/* SPI 传输超时 (单字节与 burst 共用).
+ *
+ * ⚠️ 别看线速定这个值。2KB @18MHz 纯线速只有 0.91ms, 但实测 Debug (-O0)
+ * 下 2KB burst 要 7.6ms (空载) / 15.6ms (LVGL 忙等期, 同优先级任务各分
+ * 一半 CPU) —— 瓶颈是 HAL 逐字节轮询循环在 -O0 下的开销 (~270 周期/字节),
+ * 不是线速。详见 Document/issue-log.md。
+ *
+ * 50ms = 实测最坏值的三倍余量。改这个值前先重测。 */
+#define W5500_SPI_TIMEOUT_MS        50
 
 /* 等总线锁的超时. 事务都不长 (寄存器访问 4 字节; socket 缓冲最多 2KB),
  * 正常情况锁总是立即到手。给个宽裕但有限的值 —— 超时说明有任务卡住或
@@ -121,13 +131,15 @@ static uint8_t port_spi_read(void)
 static void port_spi_read_burst(uint8_t *pBuf, uint16_t len)
 {
     /* 读方向 不关心写什么，采用原地传输, 不用为 dummy 再开一块缓冲 */
-    BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, pBuf, len, W5500_SPI_TIMEOUT_MS);
+    BSP_ASSERT(BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, pBuf, len,
+                                      W5500_SPI_TIMEOUT_MS) == BSP_SPI_OK);
 }
 
 static void port_spi_write_burst(uint8_t *pBuf, uint16_t len)
 {
     /* 写方向不关心收到的字节 —— rx 传 NULL, BSP 会走 HAL_SPI_Transmit */
-    BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, NULL, len, W5500_SPI_TIMEOUT_MS);
+    BSP_ASSERT(BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, NULL, len,
+                                      W5500_SPI_TIMEOUT_MS) == BSP_SPI_OK);
 }
 
 /* ================================================================

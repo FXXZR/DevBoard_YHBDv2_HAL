@@ -184,10 +184,12 @@ uint8_t BSP_SPI_Transfer(BSP_SPI_Bus_Id_t id, uint8_t data, uint32_t timeout)
     return rx;
 }
 
-void BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
-                            const uint8_t *tx, uint8_t *rx, uint16_t len,
-                            uint32_t timeout)
+BSP_SPI_Status_t BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
+                                        const uint8_t *tx, uint8_t *rx, uint16_t len,
+                                        uint32_t timeout)
 {
+    HAL_StatusTypeDef hal_st;
+
     BSP_ASSERT(id < BSP_SPI_BUS_COUNT);
     BSP_ASSERT(spi_ctx[id].initialized);
     BSP_ASSERT(__get_IPSR() == 0);         /* ISR 里不做阻塞式传输 */
@@ -195,9 +197,11 @@ void BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
     BSP_ASSERT(len > 0);                   /* 零长度"传输"几乎总是算错了长度 */
 
     if (rx) {
-        HAL_SPI_TransmitReceive(&spi_ctx[id].handle,
-                                (uint8_t *)tx, rx, len, timeout);
+        hal_st = HAL_SPI_TransmitReceive(&spi_ctx[id].handle,
+                                         (uint8_t *)tx, rx, len, timeout);
     } else {
-        HAL_SPI_Transmit(&spi_ctx[id].handle, (uint8_t *)tx, len, timeout);
+        hal_st = HAL_SPI_Transmit(&spi_ctx[id].handle, (uint8_t *)tx, len, timeout);
     }
+
+    return (hal_st == HAL_OK) ? BSP_SPI_OK : BSP_SPI_ERR_TIMEOUT;
 }
