@@ -96,9 +96,9 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 ## Current Firmware Behavior
 
-`main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → W5500 通路自检 → 启动 FreeRTOS 调度器。
+`main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → W5500 通路自检 + 静态网络参数 → 启动 FreeRTOS 调度器。
 
-当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vW5500Task`（W5500 链路监控，1Hz 轮询 PHYCFGR）。
+当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（网络任务，当前 1Hz 轮询 PHYCFGR，W2 起接管 socket）。
 
 ---
 

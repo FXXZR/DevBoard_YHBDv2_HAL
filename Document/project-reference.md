@@ -19,14 +19,14 @@
 ```
 Application/                业务逻辑、RTOS 任务、移植钩子
   ├─ Common/                rtos_port_hooks.c (FreeRTOS 移植钩子)
-  ├─ Tasks/                 task_init / led / disp / w5500
+  ├─ Tasks/                 task_init / led / disp / net
   └─ Test/                  各外设验证 .c + 统一测试头 test.h
       ↓ depends on
 Services/                   硬件抽象之上、业务逻辑之下
   ├─ log/                   分级日志 (log.c/h, 基于 bsp_usart TX 环形缓冲)
   ├─ bus/                   SPI 总线互斥锁 (spi_bus)
   └─ devices/               器件驱动 + 第三方库移植层
-                            (w5500_drv / w5500_port / diskio / lvgl_port)
+                            (w5500_drv / w5500_net / w5500_port / diskio / lvgl_port)
       ↓ depends on
 { Middleware/,  BSP/ }      ← 平级, 互不依赖
   Middleware/               第三方库源码与配置, 只读 (移植层不在这一层)
@@ -96,10 +96,11 @@ CMake 目标与依赖：
 | `Services/log/log.h` `log.c`           | 分级日志 — 预处理期分级, DWT 补启动阶段时间戳                          |
 | `Services/bus/spi_bus.h` `spi_bus.c`   | SPI 总线互斥锁 — 锁的边界 = CS 的边界                                  |
 | `Services/devices/w5500_drv.c`         | W5500 上电 / 通路校验 / PHY 配置                                       |
+| `Services/devices/w5500_net.c`         | W5500 网络层 — 网络参数 (静态 IP) + socket 超时封装                    |
 | `Services/devices/w5500_port.c`        | ioLibrary 移植层 — 注册 CS/SPI/临界区回调 (含总线锁)                   |
 | `Services/devices/lvgl_port.c` `h`     | LVGL 移植层 — 显示 flush (DMA) + 触摸读取回调挂接                      |
 | `Middleware/ioLibrary/`                | WIZnet 官方 W5500 硬件 TCP/IP 协议栈, MIT, 只读                        |
-| `Application/Tasks/task_w5500.c`       | W5500 链路监控 — 1Hz 轮询 PHYCFGR                                      |
+| `Application/Tasks/task_net.c`         | 网络任务 — 单任务持有 socket 层; 当前 1Hz 轮询 PHYCFGR                 |
 | `Start/startup_stm32f103xe.s`          | Vector table, Reset_Handler                                            |
 | `Start/STM32F103XX_FLASH.ld`           | Linker script — memory regions + sections                             |
 | `Start/stm32f1xx_hal_conf.h`           | HAL module enable/disable switches                                     |

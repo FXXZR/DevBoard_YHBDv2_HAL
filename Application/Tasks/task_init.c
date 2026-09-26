@@ -6,7 +6,7 @@
 #include "task_led.h"
 #include "task_test.h"
 #include "task_disp.h"
-#include "task_w5500.h"
+#include "task_net.h"
 #include "spi_bus.h"
 #include <stddef.h>   /* NULL */
 
@@ -49,11 +49,12 @@ static const TaskDef_t task_list[] = {
         .pv_params   = NULL,
     },
     {
-        /* W5500 链路监控: 每秒读一次 PHYCFGR, 值变化打日志.
+        /* 网络任务: 单任务持有 W5500 socket 层 (多任务进 socket 层会让状态机
+         * 交错, 见 task_net.c). 当前只做 PHY 链路轮询, D2 起接管 socket.
          * 栈给 512 (含 vsnprintf, 见 log.c) —— 256 对带格式化的日志偏紧.
          * 优先级 1: 低频诊断任务, 不参与实时性. */
-        .name        = "w5500",
-        .func        = vW5500Task,
+        .name        = "net",
+        .func        = vNetTask,
         .stack_depth = 512,
         .priority    = 1,
         .p_handle    = NULL,

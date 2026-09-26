@@ -46,7 +46,7 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_disp.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_w5500.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_net.c
 )
 
 # ---- 头文件路径 ----

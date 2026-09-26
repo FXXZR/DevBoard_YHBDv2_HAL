@@ -3,7 +3,9 @@
  * @brief   W5500 设备服务 —— 芯片上电、通路校验、PHY 配置
  * @note    分层位置:
  *
- *              Application/Tasks   ← 直接用 ioLibrary 的 socket API 做业务
+ *              Application/Tasks/task_net.c   ← 业务: 什么时候连、发什么
+ *                    ↓
+ *              Services/devices/w5500_net.c   ← 网络参数 + socket 超时封装
  *                    ↓
  *              Services/devices/w5500_drv.c   ← 本模块: 把芯片带到可用状态
  *                    ↓ 注册回调
@@ -11,9 +13,8 @@
  *                    ↓
  *              BSP/bsp_w5500_hw.c             ← 板级: CS/RESET/INT 引脚
  *
- *          本模块【不】封装 socket 收发 —— 那是 ioLibrary 的活, 任务层直接
- *          用它的 API 即可。这里只负责 ioLibrary 不管的那部分: 板级初始化、
- *          复位时序、PHY 工作模式配置。
+ *          本模块只负责 ioLibrary 不管的那部分: 板级初始化、复位时序、PHY
+ *          工作模式配置。socket 封装在 w5500_net.c。
  */
 
 #ifndef __W5500_DRV_H__
@@ -90,7 +91,7 @@ void W5500_Port_Register(void);
  *            顺序反了的话 PHY 配置会被悄悄抹掉, 现象是"链路一直起不来",
  *            而看代码完全合理。
  *
- *         内部含约 500ms 阻塞 (复位后等 PLL 锁定), 只在启动时调一次。
+ *         内部含约 100ms 阻塞 (复位后等 PLL 锁定), 只在启动时调一次。
  */
 W5500_Status_t W5500_Drv_Init(void);
 

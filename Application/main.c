@@ -28,6 +28,7 @@
 #include "bsp_usart.h"
 #include "bsp_sram.h"
 #include "w5500_drv.h"
+#include "w5500_net.h"
 #include "FreeRTOS.h"
 #include "task.h"
 #include "task_init.h"
@@ -84,16 +85,20 @@ int main(void) {
      * 复位时序 + 读 VERSIONR, 期望 0x04 —— 读回值本身就是通路测试,
      * 不需要示波器. 失败时按状态码区分"总线无响应"和"版本不对",
      * 两者的排查方向完全不同 (接线 vs 芯片型号).
-     * 注: 内部含约 500ms 复位等待, 只在启动时走一次. */
+     * 注: 内部含约 100ms 复位等待, 只在启动时走一次. */
     {
         W5500_Status_t w5500_st  = W5500_Drv_Init();
         uint8_t        w5500_ver = W5500_Drv_ReadVersion();
 
         if (w5500_st == W5500_OK) {
             /* PHYCFGR 打原始值: 此刻自协商还没完成 (要 1~2 秒),
-             * 所以这里多半是 0xFA, 稍后由 vW5500Task 报出 0xFF */
+             * 所以这里多半是 0xFA, 稍后由 vNetTask 报出 0xFF */
             LOG_I("W5500 ok, VERSIONR=0x%02X, PHYCFGR=0x%02X",
                   w5500_ver, W5500_Drv_ReadPhyCfg());
+
+            /* 静态网络参数 —— 默认路径。DHCP 只做一遍 (否则每次实验 IP 都变,
+             * 脚本和抓包过滤器都要跟着改), 走 task_net */
+            W5500_Net_ConfigStatic();
         } else {
             LOG_E("W5500 init failed: %s (VERSIONR=0x%02X)",
                   W5500_Drv_StatusStr(w5500_st), w5500_ver);

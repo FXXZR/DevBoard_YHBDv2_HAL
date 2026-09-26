@@ -37,7 +37,7 @@ extern "C" {
  * @brief  配置 CS / RESET / INT 三根控制线并初始化 SPI2
  * @note   CS 与 RESET 初始为高 (未选中 / 不复位), 避免上电瞬间误动作。
  *         INT 配为输入上拉 —— W1 只把它准备好, EXTI 与收包在 W2 接。
- *         约 500ms 阻塞 (复位后等 PHY PLL 锁定), 只在启动时调一次。
+ *         约 100ms 阻塞 (复位后等 PHY PLL 锁定), 只在启动时调一次。
  */
 void BSP_W5500_HW_Init(void);
 
@@ -49,7 +49,7 @@ void BSP_W5500_HW_CsHigh(void);
 
 /**
  * @brief  硬件复位时序
- * @note   RESET 拉低 1ms → 拉高 → 等 500ms 让内部 PLL 锁定。
+ * @note   RESET 拉低 1ms → 拉高 → 等 100ms 让内部 PLL 锁定。
  *
  *         野火参考例程用的是 2us + 1600ms: 2us 短于通常要求的 500us,
  *         1600ms 又太长 (开机白等 1.6 秒), 故取中间值。

@@ -35,6 +35,7 @@ target_sources(services PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/bus/spi_bus.c
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/w5500_port.c
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/w5500_drv.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/devices/w5500_net.c
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/diskio.c    # FatFs 平台胶水 (SD 卡)
     ${CMAKE_CURRENT_SOURCE_DIR}/devices/lvgl_port.c # LVGL 显示/触摸挂接
 )
