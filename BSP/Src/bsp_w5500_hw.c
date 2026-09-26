@@ -22,7 +22,7 @@
 
 /* 复位时序 —— 见 bsp_w5500_hw.h 的说明 */
 #define W5500_RESET_LOW_MS      1
-#define W5500_RESET_SETTLE_MS   500
+#define W5500_RESET_SETTLE_MS   100
 
 /* 一条总线 —— SPI2 (PB13/14/15, 模式 3, 见 bsp_spi.c 的硬件映射表) */
 #define W5500_SPI_BUS           BSP_SPI_BUS_2

@@ -86,6 +86,81 @@ Application/  →  Services/  →  { Middleware/, BSP/ }  →  Drivers/HAL
 > `Middleware/` 下只剩上游源码与配置。（FreeRTOS 的 `Middleware/FreeRTOS/port/`
 > 是上游自带的可移植层，与这里说的移植胶水不是一回事，保持原位。）
 
+- **已知例外：LVGL 目标带一条 `BSP/Inc` 头文件路径**（[lvgl-8.3.11/CMakeLists.txt](../Middleware/lvgl-8.3.11/CMakeLists.txt)）。
+  它是**承重的，不要删**：`lv_conf.h` 里 `LV_MEM_POOL_INCLUDE "bsp_sram.h"` +
+  `LV_MEM_POOL_ALLOC → BSP_SRAM_LVGL_BASE`，LVGL 的 `lv_mem.c` 真的会 include 它
+  （内存池放外部 SRAM，地址常量由 BSP 定义）。
+
+  这条豁免的边界要认清：**只是 include 路径，不是 `target_link_libraries(lvgl bsp)`** ——
+  CMake 目标图上 Middleware 与 BSP 仍然平级。"配置留 Middleware" 这条约定必然
+  导致配置里引用跨层常量，这属于可接受的副作用，但**不要再扩大**：新增的适配代码
+  一律进 `Services/devices/`。
+
+### 总线锁的粒度
+
+**锁必须覆盖「不变量」，而不是覆盖「线」。** 这是给外设上锁时最容易搞错的一点。
+
+`Services/bus` 提供的锁只保证**线级**语义：两帧不会在 MOSI 上交错。这对
+**不跨帧保存状态**的器件就够了（W5500：每个寄存器事务语义自包含，socket 状态
+由芯片内部按 socket 号维护），所以 W5500 的锁可以加在 CS 回调里
+（[w5500_port.c](../Services/devices/w5500_port.c) 的 `port_cs_select`）——
+ioLibrary 本来就用 select…deselect 包住每个事务，加在那里**免费获得整帧粒度**。
+
+**但这条不能推广。** 器件一旦有跨帧不变量，CS 边界就不再是事务边界：
+
+| 器件 | 跨帧状态 | CS 边界 = 事务边界？ | 锁加在哪 |
+|------|---------|-------------------|---------|
+| W5500 | 无（寄存器自包含） | ✅ | CS 回调 |
+| W25Q64 | **有（WEL 位）** | ❌ | **驱动的操作级** |
+
+W25Q64 一次"写一页" = `write_enable`(CS 周期①) → `page_program`(CS 周期②)
+→ `wait_busy`(CS 周期③×N)，**三个以上 CS 周期**。若把锁加在 CS 边界上，
+任务 A 置完 WEL 就放锁，任务 B 插进来做一次擦除（擦除完成会清 WEL），
+任务 A 的 Page Program 就会被芯片**静默丢弃** —— 状态寄存器读回一切正常。
+[bsp_spi_flash.c](../BSP/Src/bsp_spi_flash.c) 当前**没有**用 `SpiBus`，接入时必须
+按此规则加在操作级。
+
+> ⚠️ **真正的禁令是「同一个驱动内不得嵌套」，不是「一条总线只能有一种粒度」。**
+> 两种粒度共用同一把**非递归**互斥量，谁持锁谁独占总线，彼此之间没有嵌套：
+>
+> ```
+> A (CS 回调加锁):   [take L] 帧 [release L]
+> B (操作级加锁):    [take L] 帧①(裸) 帧②(裸) 帧③(裸) [release L]
+> ```
+>
+> B 路径里的帧是**裸的**（不再经过 CS 级锁），所以 A 与 B 可以共存于一条总线 ——
+> 说"一条总线上的设备只能二选一"就说过头了。要禁止的是**嵌套**：同一个驱动里
+> 操作级路径又走到 CS 级锁，才是同一个互斥量的重复获取。
+
+嵌套的后果也要写准：FreeRTOS 非递归互斥量上自己取自己**不是立即死锁**，而是
+阻塞到超时后返回 -1（在本工程里触发 [bsp_assert](../BSP/Src/bsp_assert.c) 通道），
+只有传 `SPI_BUS_WAIT_FOREVER` 才是真死锁。所以给操作级路径选超时值时要意识到：
+它决定症状是「当场断言一句」还是「系统看着还活着但功能全无」。
+
+**W25Q64 的锁由谁加**：BSP 不能加 —— `BSP/` 不许向上依赖 `Services/bus`。
+所以 flash 接入总线锁的前提是先按 W5500 的形状拆一次（**留到 W4，W2 不动**）：
+
+```
+BSP/Src/bsp_w25q64_hw.c      CS / GPIO / SPI1 初始化        (板级, 无锁无 RTOS)
+Services/devices/w25q64.c    指令协议 + 操作级锁             (依赖 bsp_w25q64_hw / bsp_spi / spi_bus)
+```
+
+操作级加锁一律用「包壳」模式，让提前 return 漏解锁在结构上不可能：
+
+```c
+static Status_t page_write_nolock(...);          /* 真正的逻辑, 一行锁都没有 */
+Status_t W25Q64_Write(...)
+{
+    if (SpiBus_Lock(BSP_SPI_BUS_1, W25Q64_LOCK_TIMEOUT_MS) != 0) return W25Q64_ERR_BUSY;
+    Status_t st = page_write_nolock(...);        /* WEL → PP → wait_busy 全在这段里 */
+    SpiBus_Unlock(BSP_SPI_BUS_1);
+    return st;
+}
+```
+
+持锁时长的量级（**决定 timeout 参数，要写进驱动注释**）：页写 ~1ms / 4KB 扇区擦除
+~50ms / 64KB 块擦除 ~150ms / 整片擦除 ~20s（典型值，最大值查手册）。
+
 ## 宏使用规范 (Macro Usage Rules)
 
 严格遵守 C11 现代实践，减少预处理器滥用：

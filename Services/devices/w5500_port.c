@@ -14,6 +14,8 @@
  *          注册时机由 W5500_Drv_Init() 负责, 早于任何一次 WIZCHIP_READ。
  */
 
+#include <stddef.h>             /* NULL */
+
 #include "w5500_drv.h"
 #include "spi_bus.h"
 #include "bsp_spi.h"
@@ -28,14 +30,16 @@
 
 #define W5500_SPI_BUS               BSP_SPI_BUS_2
 
-/* 单字节 SPI 传输超时. 18MHz 下一字节约 0.5us, 100ms 已经是天文数字,
- * 超时只可能是硬件故障。 */
-#define W5500_SPI_TIMEOUT_MS        100
+/* SPI 传输超时 (单字节与 burst 共用). 18MHz 下一字节约 0.44us, 2KB 事务
+ * 纯线速也只有 0.91ms —— 10ms已经够多了 */
+#define W5500_SPI_TIMEOUT_MS        10
 
-/* 等总线锁的超时. W5500 的事务都很短 (寄存器访问 4 字节; socket 缓冲
- * 最多 2KB ≈ 1ms), 正常情况锁总是立即到手。给个宽裕但有限的值 ——
- * 超时说明有任务卡住或死锁, 那种情况必须响, 不能静默继续。 */
-#define W5500_LOCK_TIMEOUT_MS       1000
+/* 等总线锁的超时. 事务都不长 (寄存器访问 4 字节; socket 缓冲最多 2KB),
+ * 正常情况锁总是立即到手。给个宽裕但有限的值 —— 超时说明有任务卡住或
+ * 死锁, 那种情况必须响, 不能静默继续。
+ *
+ * 2KB 事务的持锁时长: 18MHz 下纯线速 0.91ms, 见 W5500_SPI_TIMEOUT_MS 的说明. */
+#define W5500_LOCK_TIMEOUT_MS       100
 
 /* ================================================================
  * 临界区回调
@@ -108,6 +112,25 @@ static uint8_t port_spi_read(void)
 }
 
 /* ================================================================
+ * SPI burst 回调 —— socket 数据面
+ *
+ * 上面的单字节回调只够访问寄存器 (每帧 4 字节). 一旦收发 socket 数据,
+ * ioLibrary 走的是 WIZCHIP_READ_BUF/WRITE_BUF，提供适配能提高效率；
+ * ================================================================ */
+
+static void port_spi_read_burst(uint8_t *pBuf, uint16_t len)
+{
+    /* 读方向 不关心写什么，采用原地传输, 不用为 dummy 再开一块缓冲 */
+    BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, pBuf, len, W5500_SPI_TIMEOUT_MS);
+}
+
+static void port_spi_write_burst(uint8_t *pBuf, uint16_t len)
+{
+    /* 写方向不关心收到的字节 —— rx 传 NULL, BSP 会走 HAL_SPI_Transmit */
+    BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, NULL, len, W5500_SPI_TIMEOUT_MS);
+}
+
+/* ================================================================
  * 注册
  * ================================================================ */
 
@@ -116,4 +139,8 @@ void W5500_Port_Register(void)
     reg_wizchip_cris_cbfunc(port_cris_enter, port_cris_exit);
     reg_wizchip_cs_cbfunc  (port_cs_select,   port_cs_deselect);
     reg_wizchip_spi_cbfunc (port_spi_read,    port_spi_write);
+
+    /* socket 数据面 —— 见上方 burst 回调的说明. 不注册的话 ioLibrary 会
+     * 退回逐字节循环, 功能一样但吞吐差 2~3 倍。 */
+    reg_wizchip_spiburst_cbfunc(port_spi_read_burst, port_spi_write_burst);
 }
