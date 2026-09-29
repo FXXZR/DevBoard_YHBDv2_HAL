@@ -93,10 +93,13 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
                                        uint16_t port, uint32_t timeout_ms);
 
 /**
- * @brief  关闭 socket 并等它回到 CLOSED
- * @note   ⚠️ 内含【无超时】等待: ioLibrary 的 close() 里是
- *         `while (getSn_SR(sn) != SOCK_CLOSED);`。正常链路约 1 个 RTT,
- *         但对端消失时要等芯片把 TCP 重传次数耗尽 —— D3 拔网线那组实测这个数。
+ * @brief  关闭 socket: 已连接先发 FIN, 再带期限等它回到 CLOSED
+ * @note   等不到就发 CLOSE 命令强制关闭 —— Sn_CR_CLOSE 是"立即关", 不等
+ *         对端回应。所以本函数【有界】: 对端不可达(拔网线)时最多阻塞
+ *         W5500_CLOSE_TIMEOUT_MS 而不是无限期。
+ *
+ *         这一条是实测逼出来的: ioLibrary 的 close()/disconnect() 里都是
+ *         无超时等待, 对端消失时网络任务会整个卡在关连接上 (日志直接停住)。
  */
 void W5500_Sock_Close(uint8_t sn);
 
@@ -126,6 +129,57 @@ W5500_Sock_Status_t W5500_Sock_Send(uint8_t sn, const uint8_t *buf, uint16_t len
  */
 W5500_Sock_Status_t W5500_Sock_Recv(uint8_t sn, uint8_t *buf, uint16_t len,
                                     uint32_t timeout_ms, uint16_t *received);
+
+/**
+ * @brief  打开 socket 为 TCP 服务端并进入监听
+ * @note   与客户端一样要先用一次 socket(); 区别是接着发 LISTEN 而不是
+ *         CONNECT。监听中的 socket 状态是 LISTEN。
+ */
+W5500_Sock_Status_t W5500_Sock_Listen(uint8_t sn, uint16_t local_port);
+
+/**
+ * @brief  等服务端 socket 被连上 (LISTEN → SYNRECV → ESTABLISHED)
+ * @note   服务端没有"connect"这个动作, 只能等 —— 所以是轮询 Sn_SR 而不是
+ *         发命令。状态变迁同样打进日志。
+ */
+W5500_Sock_Status_t W5500_Sock_WaitConnected(uint8_t sn, uint32_t timeout_ms);
+
+/** @brief socket 当前是否已连接 (非阻塞查 Sn_SR, 用于收包循环里判断对端还在不在) */
+int W5500_Sock_IsConnected(uint8_t sn);
+
+/**
+ * @brief  打开 socket 为 UDP
+ * @note   UDP 是无连接的, 打开后立刻可收发, 没有 connect/listen 那一步。
+ */
+W5500_Sock_Status_t W5500_Sock_UdpOpen(uint8_t sn, uint16_t local_port);
+
+/**
+ * @brief  发一个 UDP 包
+ * @param  ip/port  目的地址 —— 每次调用都要给, 芯片是发送前才把它写进
+ *                  socket 寄存器。所以同一个 socket 可以轮流发给不同对端
+ *                  (这正是 UDP 与 TCP 的差别: 没有"连接"可复用)。
+ */
+W5500_Sock_Status_t W5500_Sock_UdpSendTo(uint8_t sn, const uint8_t *buf, uint16_t len,
+                                         const uint8_t ip[4], uint16_t port,
+                                         uint32_t timeout_ms, uint16_t *sent);
+
+/**
+ * @brief  收一个 UDP 包
+ * @param  from_ip/from_port 出参: 这包是谁发的 —— UDP 没有连接, 只能从包头取
+ * @note   ⚠️ buf 必须装得下整个包。截断读会让剩下的部分留在芯片缓冲里, 而
+ *         本封装的等待条件 (RX_RSR != 0) 看不出来 —— 下次调用会白等到超时。
+ */
+W5500_Sock_Status_t W5500_Sock_UdpRecvFrom(uint8_t sn, uint8_t *buf, uint16_t len,
+                                           uint32_t timeout_ms, uint16_t *received,
+                                           uint8_t from_ip[4], uint16_t *from_port);
+
+/**
+ * @brief  读 Sn_SR 原始值 (芯片的 TCP 状态机)
+ * @return SOCK_CLOSED / SOCK_ESTABLISHED / SOCK_CLOSE_WAIT ... 见 "socket.h"
+ * @note   要按状态做分支判断时用它; 只为了打日志用 StateStr 更方便。
+ *         值来自芯片, 不是我们的抽象 —— 换协议栈时这里会变。
+ */
+uint8_t W5500_Sock_State(uint8_t sn);
 
 /** @brief 读 Sn_SR 并转成可读字符串 (供日志标注连接状态, 如 ESTABLISHED) */
 const char *W5500_Sock_StateStr(uint8_t sn);

@@ -249,8 +249,8 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 | Region | Used | Total | % |
 | ------ | ---- | ----- | - |
-| FLASH | 315600 B | 512 KB | 60.20% |
-| RAM | 55072 B | 64 KB | 84.03% |
+| FLASH | 330568 B | 512 KB | 63.05% |
+| RAM | 59728 B | 64 KB | 91.14% |
 
 分阶段（FLASH）：
 
@@ -260,9 +260,28 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | + ioLibrary vendor（无代码引用，归档成员不被抽出） | 306012 B |
 | + Services 层 + W5500 接入 | 315608 B |
 | + FatFs/LVGL 移植层迁入 Services（代码未增减，段排布位移） | 315600 B |
+| + 网络层（w5500_net：参数/socket/服务端/UDP） | 330568 B |
 
-> ⚠️ 内部 RAM 已用 84%。新增任务或缓冲区前先确认余量（`arm-none-eabi-size` 的 `bss` 是主要占用）。
+> ⚠️ 内部 RAM 已用 91%。**新增缓冲区前先看余量。**
+> 当前占用大头（`nm --size-sort`）：两个 LVGL 绘图缓冲各 15360 B（共 30720 B，占已用
+> 的一半）、FreeRTOS 堆 16384 B。要腾空间优先动绘图缓冲（240×32 → 240×16 省 15KB），
+> 不要动 LVGL 内存池 —— 它已经在片外 SRAM 了。
 > Release 为 `-Os -g0`，通常显著小于 Debug。
+
+## 实测数据（W5500 通路）
+
+| 项 | 实测值 | 条件 |
+| --- | --- | --- |
+| 2KB SPI 读 burst | **7.6 ms** | 空载；写 burst 2.7 ms。线速只要 0.91 ms |
+| 2KB SPI 读 burst（被抢 CPU） | **16.4 ms** | 同优先级任务忙等时，正好 2 倍 |
+| 收发 2KB 往返 | ~5 ms | TCP，Debug `-O0` |
+| TCP 握手 | 2~4 ms | 链路稳定后；刚上电可能撞对端地址探测，见 issue-log 005 |
+| ICMP 往返 | 1.19 ms | PC 侧抓包测得 |
+| UDP 全速收包 | **~2000 包/秒** | 上限由 SPI 吞吐决定，非调度 |
+
+> `W5500_SPI_TIMEOUT_MS` 取 50 ms 就是照第一行定的（最坏值 16.4 ms 的 3 倍余量）。
+> 这些数字都是 `-O0` 的 Debug 构建 —— 瓶颈是 HAL 逐字节轮询循环的 CPU 开销，
+> 不是线速。根因见 [issue-log.md 003](issue-log.md)。
 
 ## Debug
 

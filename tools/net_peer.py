@@ -28,6 +28,7 @@ W5500 对端工具 —— 板子在 PC 侧的对话者。
 
 import argparse
 import socket
+import struct
 import time
 
 # 板子的默认地址 —— 见 Document/temp/w2-plan.md §4 的网络参数表
@@ -96,6 +97,14 @@ def make_payload(seq, size):
 def serve_tcp(args):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as srv:
         srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+        if args.mode == "stall":
+            # 把接收缓冲压到最小 —— 目的是让对端【很快】发不动。
+            # 用默认的几十 KB, 要靠"对端打满 64KB"才能造出零窗口, 太慢也太依赖
+            # 系统默认值。注意必须设在 listen 之前: 窗口大小在握手时就协商定了,
+            # accept 之后再改对已建立的连接无效。
+            srv.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2048)
+
         srv.bind((args.host, args.port))
         srv.listen(1)
         print(f"[tcp] listening on {args.host}:{args.port}  mode={args.mode}", flush=True)
@@ -117,6 +126,7 @@ def serve_tcp(args):
                         time.sleep(1)
                         stats.tick()
                 else:
+                    half_closed = False
                     try:
                         while True:
                             data = conn.recv(args.bufsize)
@@ -125,7 +135,25 @@ def serve_tcp(args):
                                 stats.line("total")
                                 break
                             stats.add(rx=len(data), rx_chunks=1)
-                            if args.mode == "echo":
+
+                            if args.mode == "rst":
+                                # 带 RST 断开: SO_LINGER=0 让 close() 直接发 RST,
+                                # 而不是走四次挥手。板子那边"对端连接被复位"只能
+                                # 这么复现 —— 正常的 close 发的是 FIN, 那是另一条路径。
+                                conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER,
+                                                struct.pack("hh", 1, 0))
+                                conn.close()
+                                print("[tcp] 已用 RST 断开", flush=True)
+                                break
+
+                            if args.mode == "half-close" and not half_closed:
+                                # 只关写方向: 对端会收到 FIN, 但这条连接还能收数据。
+                                # 板子那边应表现成 recv 报"对端已关闭"、send 仍然成功。
+                                conn.shutdown(socket.SHUT_WR)
+                                half_closed = True
+                                print("[tcp] 已发 FIN (半关闭), 之后只读不回", flush=True)
+
+                            if args.mode == "echo" and not half_closed:
                                 conn.sendall(data)
                                 stats.add(tx=len(data), tx_chunks=1)
                     except OSError as e:
@@ -136,8 +164,45 @@ def serve_tcp(args):
                         print(f"[tcp] 连接中断 ({e}), 继续监听", flush=True)
 
 
+def connect_with_retry(host, port, wait_s):
+    """板子要跑完前面的自检阶段才开始监听, 所以连不上要等, 不是一次就放弃"""
+    deadline = time.monotonic() + wait_s
+    while True:
+        try:
+            return socket.create_connection((host, port), timeout=5.0)
+        except OSError as e:
+            if time.monotonic() >= deadline:
+                raise
+            print(f"[tcp] 连不上 ({e}), 继续等板子...", flush=True)
+            time.sleep(1)
+
+
 def run_client(args):
-    with socket.create_connection((args.host, args.port), timeout=5.0) as s:
+    if args.stall:
+        # 压满对端发送窗口的专用路径。
+        # ⚠️ 接收缓冲必须在 connect 【之前】设: TCP 窗口大小是握手时协商的,
+        # 连上之后再改对这条连接无效 —— 用默认值的话对端能推几十上百 KB
+        # (Windows 还会自动调优), 根本压不满。
+        deadline = time.monotonic() + args.wait
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 2048)
+        while True:                     # 板子还没监听时要等
+            try:
+                s.connect((args.host, args.port))
+                break
+            except OSError as e:
+                if time.monotonic() >= deadline:
+                    raise
+                print(f"[tcp] 连不上 ({e}), 继续等板子...", flush=True)
+                time.sleep(1)
+        with s:
+            print(f"[tcp] connected to {args.host}:{args.port}", flush=True)
+            print("[tcp] stall: 收缓冲 2048, 不读不写 (Ctrl-C 结束)", flush=True)
+            while True:
+                time.sleep(1)
+        return
+
+    with connect_with_retry(args.host, args.port, args.wait) as s:
         print(f"[tcp] connected to {args.host}:{args.port}", flush=True)
         stats = Stats()
         payload = make_payload(0, args.size)
@@ -186,6 +251,13 @@ def serve_udp(args):
             print(f"[udp] burst {args.burst} x {args.size} B -> {target[0]}:{target[1]}",
                   flush=True)
 
+            if args.no_recv:
+                # 纯发包模式: 丢包率由板子数 (它按包头的序号统计)。
+                # 不这么设计的话, 这个工具会一直等回包, 而丢包测试里
+                # 板子根本不需要回 —— 脚本会挂在这里不退。
+                stats.line("total")
+                return
+
         while True:
             try:
                 data, peer = s.recvfrom(args.bufsize)
@@ -214,8 +286,11 @@ def main():
         p.add_argument("--host", default=host_default, help="绑定/连接的地址")
         p.add_argument("--port", type=int, default=DEFAULT_PORT)
         p.add_argument("--bufsize", type=int, default=4096, help="单次 recv 的缓冲大小")
-        p.add_argument("--mode", choices=("echo", "sink", "stall"), default="echo",
-                       help="echo=收到就回, sink=读走不回, stall=不读")
+        p.add_argument("--mode",
+                       choices=("echo", "sink", "stall", "rst", "half-close"),
+                       default="echo",
+                       help="echo=收到就回, sink=读走不回, stall=不读, "
+                            "rst=收到数据就用 RST 断开, half-close=收到数据后只关写方向")
 
     p = sub.add_parser("server", help="TCP server, 等板子来连")
     common(p, "0.0.0.0")
@@ -225,12 +300,18 @@ def main():
     p.add_argument("--size", type=int, default=1024, help="每次发送的字节数")
     p.add_argument("--count", type=int, default=1, help="往返次数")
     p.add_argument("--interval", type=float, default=0.0, help="两次之间的间隔 (秒)")
+    p.add_argument("--stall", action="store_true",
+                   help="连上后不读不写, 压满对端的发送窗口 (测对端的发送超时)")
+    p.add_argument("--wait", type=float, default=40.0,
+                   help="连不上时等板子这么久 (板子要跑完前面的自检阶段才监听)")
 
     p = sub.add_parser("udp", help="UDP echo, 可用 --burst 主动打一串包")
     common(p, "0.0.0.0")
     p.add_argument("--peer", default=BOARD_IP, help="--burst 的目标地址")
     p.add_argument("--size", type=int, default=100, help="每个包的字节数 (含 4 字节序号)")
     p.add_argument("--burst", type=int, default=0, help="启动时先发这么多个包")
+    p.add_argument("--no-recv", action="store_true",
+                   help="发完 --burst 就退出, 不等回包 (丢包率由板子统计)")
 
     args = parser.parse_args()
 

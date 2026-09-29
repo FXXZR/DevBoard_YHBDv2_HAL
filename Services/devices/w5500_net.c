@@ -43,6 +43,12 @@ static const wiz_NetInfo kNetStatic = {
  * 内部
  * ================================================================ */
 
+/* 关连接时等 Sn_SR 变 CLOSED 的期限。正常约 1 个 RTT (毫秒级);
+ * 对端不可达时靠这个值把等待切断, 不让任务无限期挂住。 */
+#define W5500_CLOSE_TIMEOUT_MS          2000
+/* 发完强制 CLOSE 命令后再给芯片的时间 (命令本身是立即生效的) */
+#define W5500_CLOSE_FORCE_WAIT_MS       100
+
 /* Sn_SR (socket 状态寄存器) 的取值 → 可读名字。
  * 这张表就是 W5500 的 TCP 状态机 —— 排查连接问题时看它比看代码快。 */
 static const char *s_state_str(uint8_t sr)
@@ -68,6 +74,48 @@ static const char *s_state_str(uint8_t sr)
 static void s_wait_cmd_done(uint8_t sn)
 {
     while (getSn_CR(sn)) { }
+}
+
+/**
+ * @brief 带期限地等 socket 回到 CLOSED
+ * @return 1 = 已 CLOSED, 0 = 期限内没等到
+ * @note  之所以要自己等: ioLibrary 的 close()/disconnect() 内部都是
+ *        `while (getSn_SR(sn) != SOCK_CLOSED);` —— **无超时**。对端不可达时
+ *        (拔网线/对端消失) 芯片要耗完 TCP 重传才回 CLOSED, 那段期间整个网络
+ *        任务就卡死在这里。实测撞到过: 日志在"异常路径结束"那行之后停住。
+ */
+static int s_wait_closed(uint8_t sn, uint32_t timeout_ms)
+{
+    TickType_t t0    = xTaskGetTickCount();
+    TickType_t limit = pdMS_TO_TICKS(timeout_ms);
+
+    while (getSn_SR(sn) != SOCK_CLOSED) {
+        if ((xTaskGetTickCount() - t0) >= limit) {
+            return 0;
+        }
+        vTaskDelay(1);
+    }
+    return 1;
+}
+
+/**
+ * @brief 状态一变就补一行日志 (connect 与 wait_connected 共用)
+ * @param prev 调用方的"上次状态", 初值必须给 0xFF (不是任何合法状态)
+ * @note  只在【变化时】打印: 轮询是每毫秒一次, 每次打印会把串口淹掉,
+ *        而 Sn_SR 的价值恰恰在"哪几步走到了、卡在哪一步"。
+ */
+static void s_trace_state(uint8_t sn, uint8_t sr, uint8_t *prev, uint32_t ms)
+{
+    if (*prev == sr) {
+        return;
+    }
+    if (*prev == 0xFF) {
+        LOG_I("sn%d Sn_SR = %s", sn, s_state_str(sr));
+    } else {
+        LOG_I("sn%d Sn_SR %s -> %s (%u ms)",
+              sn, s_state_str(*prev), s_state_str(sr), (unsigned)ms);
+    }
+    *prev = sr;
 }
 
 /**
@@ -131,6 +179,14 @@ void W5500_Net_ConfigStatic(void)
  *    有静态状态), 而且轮询里的 vTaskDelay 需要任务上下文。
  * ================================================================ */
 
+uint8_t W5500_Sock_State(uint8_t sn)
+{
+    if (sn >= W5500_SOCK_COUNT) {
+        return SOCK_CLOSED;
+    }
+    return getSn_SR(sn);
+}
+
 const char *W5500_Sock_StateStr(uint8_t sn)
 {
     if (sn >= W5500_SOCK_COUNT) {
@@ -184,25 +240,14 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
 
     TickType_t t0    = xTaskGetTickCount();
     TickType_t limit = pdMS_TO_TICKS(timeout_ms);
-    uint8_t    last  = 0;
-    int        first = 1;
+    uint8_t    last  = 0xFF;
 
     for (;;) {
         uint8_t    sr      = getSn_SR(sn);
         TickType_t elapsed = xTaskGetTickCount() - t0;
 
         /* 状态一变就打 —— 握手卡在哪一步, 芯片自己写着 */
-        if (first || sr != last) {
-            if (first) {
-                LOG_I("sn%d Sn_SR = %s", sn, s_state_str(sr));
-                first = 0;
-            } else {
-                LOG_I("sn%d Sn_SR %s -> %s (%u ms)",
-                      sn, s_state_str(last), s_state_str(sr),
-                      (unsigned)pdTICKS_TO_MS(elapsed));
-            }
-            last = sr;
-        }
+        s_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
 
         if (sr == SOCK_ESTABLISHED) {
             LOG_I("sn%d 握手完成, 用时 %u ms", sn, (unsigned)pdTICKS_TO_MS(elapsed));
@@ -231,6 +276,169 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
     }
 }
 
+int W5500_Sock_IsConnected(uint8_t sn)
+{
+    if (sn >= W5500_SOCK_COUNT) {
+        return 0;
+    }
+    return getSn_SR(sn) == SOCK_ESTABLISHED;
+}
+
+W5500_Sock_Status_t W5500_Sock_Listen(uint8_t sn, uint16_t local_port)
+{
+    if (sn >= W5500_SOCK_COUNT || local_port == 0) {
+        return W5500_SOCK_ERR_PARAM;
+    }
+    if (getSn_SR(sn) != SOCK_CLOSED) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    if (socket(sn, Sn_MR_TCP, local_port, 0) != (int8_t)sn) {
+        return W5500_SOCK_ERR_STATE;
+    }
+    if (listen(sn) != SOCK_OK) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    LOG_I("sn%d 监听 %u 端口, Sn_SR = %s", sn, local_port, W5500_Sock_StateStr(sn));
+    return W5500_SOCK_OK;
+}
+
+W5500_Sock_Status_t W5500_Sock_WaitConnected(uint8_t sn, uint32_t timeout_ms)
+{
+    if (sn >= W5500_SOCK_COUNT) {
+        return W5500_SOCK_ERR_PARAM;
+    }
+
+    TickType_t t0    = xTaskGetTickCount();
+    TickType_t limit = pdMS_TO_TICKS(timeout_ms);
+    uint8_t    last  = 0xFF;
+
+    for (;;) {
+        uint8_t    sr      = getSn_SR(sn);
+        TickType_t elapsed = xTaskGetTickCount() - t0;
+
+        /* 服务端的状态轨迹: LISTEN → SYNRECV → ESTABLISHED —— 谁连上来的、
+         * 卡在哪一步, 这里一目了然 */
+        s_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
+
+        if (sr == SOCK_ESTABLISHED) {
+            LOG_I("sn%d 对端已连上 (%u ms)", sn, (unsigned)pdTICKS_TO_MS(elapsed));
+            return W5500_SOCK_OK;
+        }
+        if (sr == SOCK_CLOSED) {
+            LOG_W("sn%d 监听被关闭 (socket 没了, 要重新 Listen)", sn);
+            return W5500_SOCK_ERR_CLOSED;
+        }
+
+        if (elapsed >= limit) {
+            LOG_W("sn%d 等连接超时 %u ms, 最后状态 %s",
+                  sn, timeout_ms, s_state_str(sr));
+            return W5500_SOCK_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+}
+
+/* ================================================================
+ * UDP
+ *
+ * 与 TCP 的区别落到代码上只有两点:
+ *   ① 打开后没有 connect/listen —— Sn_SR 直接就是 SOCK_UDP, 立刻能收发
+ *   ② 目的地址是【每次发送时】给的 (sendto), 不存在"连接"这个概念,
+ *      所以同一个 socket 可以轮流跟不同对端说话
+ * ================================================================ */
+
+W5500_Sock_Status_t W5500_Sock_UdpOpen(uint8_t sn, uint16_t local_port)
+{
+    if (sn >= W5500_SOCK_COUNT) {
+        return W5500_SOCK_ERR_PARAM;
+    }
+    if (getSn_SR(sn) != SOCK_CLOSED) {
+        return W5500_SOCK_ERR_STATE;
+    }
+    if (socket(sn, Sn_MR_UDP, local_port, 0) != (int8_t)sn) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    LOG_I("sn%d UDP 打开, 本地端口 %u", sn, local_port);
+    return W5500_SOCK_OK;
+}
+
+W5500_Sock_Status_t W5500_Sock_UdpSendTo(uint8_t sn, const uint8_t *buf, uint16_t len,
+                                         const uint8_t ip[4], uint16_t port,
+                                         uint32_t timeout_ms, uint16_t *sent)
+{
+    if (sent != NULL) {
+        *sent = 0;
+    }
+    if (sn >= W5500_SOCK_COUNT || buf == NULL || len == 0 || ip == NULL || port == 0) {
+        return W5500_SOCK_ERR_PARAM;
+    }
+
+    TickType_t t0    = xTaskGetTickCount();
+    TickType_t limit = pdMS_TO_TICKS(timeout_ms);
+
+    /* 同 TCP: 先带期限等发送缓冲 —— ioLibrary 的 sendto() 里也是无界自旋 */
+    for (;;) {
+        if (getSn_SR(sn) == SOCK_CLOSED) {
+            return W5500_SOCK_ERR_CLOSED;
+        }
+        if ((uint16_t)getSn_TX_FSR(sn) >= len) {
+            break;
+        }
+        if ((xTaskGetTickCount() - t0) >= limit) {
+            return W5500_SOCK_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+
+    int32_t n = sendto(sn, (uint8_t *)buf, len, (uint8_t *)ip, port);
+    if (n <= 0) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    *sent = (uint16_t)n;
+    return W5500_SOCK_OK;
+}
+
+W5500_Sock_Status_t W5500_Sock_UdpRecvFrom(uint8_t sn, uint8_t *buf, uint16_t len,
+                                           uint32_t timeout_ms, uint16_t *received,
+                                           uint8_t from_ip[4], uint16_t *from_port)
+{
+    if (received != NULL) {
+        *received = 0;
+    }
+    if (sn >= W5500_SOCK_COUNT || buf == NULL || len == 0) {
+        return W5500_SOCK_ERR_PARAM;
+    }
+
+    TickType_t t0    = xTaskGetTickCount();
+    TickType_t limit = pdMS_TO_TICKS(timeout_ms);
+
+    for (;;) {
+        /* RX_RSR != 0 表示至少有一个完整包 (含 8 字节包头) 躺在缓冲里 */
+        if ((uint16_t)getSn_RX_RSR(sn) != 0) {
+            break;
+        }
+        if (getSn_SR(sn) == SOCK_CLOSED) {
+            return W5500_SOCK_ERR_CLOSED;
+        }
+        if ((xTaskGetTickCount() - t0) >= limit) {
+            return W5500_SOCK_ERR_TIMEOUT;
+        }
+        vTaskDelay(1);
+    }
+
+    int32_t n = recvfrom(sn, buf, len, from_ip, from_port);
+    if (n <= 0) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    *received = (uint16_t)n;
+    return W5500_SOCK_OK;
+}
+
 void W5500_Sock_Close(uint8_t sn)
 {
     uint8_t sr;
@@ -255,9 +463,22 @@ void W5500_Sock_Close(uint8_t sn)
         disconnect(sn);
     }
 
-    /* 兜底: 确保回到 SOCK_CLOSED, 并清掉 ioLibrary 的静态记录。
-     * ⚠️ 内含 `while (getSn_SR(sn) != SOCK_CLOSED);` 的无超时等待 ——
-     * 正常约 1 个 RTT, 对端消失时要等芯片耗完重传次数。见头文件。 */
+    /* ★ 自己带期限等, 等不到就【强制关闭】。
+     *
+     * 不能直接调 close(): 它内部是无超时等待, 对端不可达时(拔网线、对端消失)
+     * 芯片要先耗完 TCP 重传才回 CLOSED —— 实测那段期间网络任务整个卡死,
+     * 日志直接停住。而 Sn_CR_CLOSE 是"立即关", 不等对端回应。 */
+    if (!s_wait_closed(sn, W5500_CLOSE_TIMEOUT_MS)) {
+        LOG_W("sn%d 等不到 CLOSED (对端不可达?), 发 CLOSE 强制关闭", sn);
+        setSn_CR(sn, Sn_CR_CLOSE);
+        s_wait_cmd_done(sn);
+        /* 兜底再等一下; 仍未 CLOSED 说明是芯片级故障, 下面 close() 会阻塞,
+         * 那就该由断言通道响了 —— 但那是硬件坏了, 与本处逻辑无关 */
+        (void)s_wait_closed(sn, W5500_CLOSE_FORCE_WAIT_MS);
+    }
+
+    /* 此时 Sn_SR 已是 CLOSED, close() 内部第一轮就返回; 它的作用是
+     * 清掉 ioLibrary 的静态记录 (sock_is_sending / sock_io_mode 等) */
     close(sn);
 }
 

@@ -33,18 +33,13 @@
 #include "log.h"
 
 #include "task_net.h"
+#include "net_selftest.h"
 #include "w5500_drv.h"
-#include "w5500_net.h"
-#include "bsp_systick.h"
-
-/* 仅 D2 的裸读基准用 (WIZCHIP_READ_BUF / WIZCHIP_RXBUF_BLOCK), 量完即删 */
-#include "w5500.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
 #include <limits.h>     /* ULONG_MAX */
-#include <string.h>     /* memcmp */
 
 /* ================================================================
  * 配置
@@ -71,8 +66,8 @@ enum {
 static uint8_t s_phy_last;
 static int     s_phy_first = 1;
 
-/* D2 冒烟只跑一次 (脚手架, D5 删) */
-static int     s_smoke_done;
+/* 自检只跑一次 (脚手架, 见 net_selftest.c) */
+static int     s_selftest_done;
 
 /* ================================================================
  * 周期服务
@@ -98,122 +93,6 @@ static void net_tick(void)
         s_phy_last = phy;
     }
 }
-
-/* ================================================================
- * D2 冒烟测试 —— 临时脚手架, D5 接 DHCP/DNS 时由业务流程取代
- *
- * 连 PC 上的 tools/net_peer.py (TCP server, echo 模式), 收发 2KB 并核对内容,
- * 顺带量出单次收发的实际耗时 —— 那是 W5500_SPI_TIMEOUT_MS 取值的依据
- * (18MHz 下 2KB 纯线速 0.91ms)。
- *
- * 量得准的前提: 发之前发送缓冲是空的、收之前数据已经到齐 —— 这样封装里的
- * 轮询首轮就满足条件, 量到的接近纯 SPI 搬运耗时, 不含等待。
- * ================================================================ */
-
-enum {
-    NET_TEST_SOCK       = 0,        /* 专用 socket 号 —— DHCP/DNS 各要一个, 别撞 */
-    NET_TEST_PEER_PORT  = 5000,     /* net_peer.py 的默认端口 */
-    NET_TEST_ROUNDS     = 4,
-    NET_TEST_BYTES      = 2048,     /* 用满 socket 缓冲, 逼出最坏耗时 */
-    NET_TEST_TIMEOUT_MS = 3000,
-    /* 轮间隔: 把测量铺到时间轴上。disp 任务开机后有一段长时间忙等
-     * (触摸校准, 每点最长 10s), 间隔取 5s 才能同时采到"被抢"和"没人抢"
-     * 两种情形 —— 单看一次数字分不清是搬运慢还是任务没拿到 CPU。 */
-    NET_TEST_GAP_MS     = 5000,
-};
-
-/* 对端 = PC。直连场景里 PC 就是网关 (见 w5500_net.c 的参数表) */
-static const uint8_t kTestPeerIp[4] = { 192, 168, 1, 1 };
-
-/* ⚠️ 收发缓冲必须 static: 2+2KB 放栈上会直接把 512 字的任务栈撑爆 */
-static uint8_t s_test_tx[NET_TEST_BYTES];
-static uint8_t s_test_rx[NET_TEST_BYTES];
-
-/**
- * @brief 2KB 裸读基准 —— 只量 SPI 搬运本身
- *
- * 直接读 socket 0 的 RX 缓冲内存, 不碰协议栈、不等数据、不发命令 ——
- * 排除掉一切"等"的成分后, 剩下的就是纯搬运耗时。与冒烟里量到的
- * 收发耗时一比, 就知道多出来的时间是花在搬运上还是花在等调度上。
- */
-static void net_burst_bench(void)
-{
-    LOG_I("--- 2KB 裸读基准 ---");
-
-    for (int i = 0; i < 5; i++) {
-        uint32_t t0 = BSP_SYSTICK_GetUs();
-
-        WIZCHIP_READ_BUF(((uint32_t)0 << 8) + (WIZCHIP_RXBUF_BLOCK(NET_TEST_SOCK) << 3),
-                         s_test_rx, NET_TEST_BYTES);
-
-        LOG_I("  #%d: %u us", i, (unsigned)(BSP_SYSTICK_GetUs() - t0));
-    }
-}
-
-static void net_smoke_test(void)
-{
-    net_burst_bench();      /* 先量一次基线 */
-
-    LOG_I("--- 冒烟: 连 %u.%u.%u.%u:%u, %u 轮 x %u B ---",
-          kTestPeerIp[0], kTestPeerIp[1], kTestPeerIp[2], kTestPeerIp[3],
-          NET_TEST_PEER_PORT, NET_TEST_ROUNDS, NET_TEST_BYTES);
-
-    for (int round = 1; round <= NET_TEST_ROUNDS; round++) {
-        uint16_t sent = 0, got = 0;
-        uint32_t us_send, us_recv;
-        W5500_Sock_Status_t st;
-
-        for (int i = 0; i < NET_TEST_BYTES; i++) {
-            s_test_tx[i] = (uint8_t)(i + round);    /* 每轮不同, 便于核对 */
-        }
-        memset(s_test_rx, 0, sizeof(s_test_rx));
-
-        if (W5500_Sock_Open(NET_TEST_SOCK, 0) != W5500_SOCK_OK) {
-            LOG_E("#%d Open 失败", round);
-            return;
-        }
-        if (W5500_Sock_Connect(NET_TEST_SOCK, kTestPeerIp, NET_TEST_PEER_PORT,
-                               NET_TEST_TIMEOUT_MS) != W5500_SOCK_OK) {
-            LOG_E("#%d 连接失败 —— PC 上的 net_peer.py 起来了吗?", round);
-            return;                     /* Connect 失败时已自行 Close */
-        }
-
-        us_send = BSP_SYSTICK_GetUs();
-        st = W5500_Sock_Send(NET_TEST_SOCK, s_test_tx, NET_TEST_BYTES,
-                             NET_TEST_TIMEOUT_MS, &sent);
-        us_send = BSP_SYSTICK_GetUs() - us_send;
-
-        if (st != W5500_SOCK_OK) {
-            /* 不早退的话, 下面会表现成"接收超时", 分不清是哪一头出的问题 */
-            LOG_E("#%d 发送失败: %s (发出 %u B)", round,
-                  W5500_Sock_StatusStr(st), sent);
-            W5500_Sock_Close(NET_TEST_SOCK);
-            return;
-        }
-
-        /* 隔开再收: 让回包先到, Recv 首轮就能取走, 量到的才是搬运耗时 */
-        vTaskDelay(pdMS_TO_TICKS(50));
-
-        us_recv = BSP_SYSTICK_GetUs();
-        st = W5500_Sock_Recv(NET_TEST_SOCK, s_test_rx, NET_TEST_BYTES,
-                             NET_TEST_TIMEOUT_MS, &got);
-        us_recv = BSP_SYSTICK_GetUs() - us_recv;
-
-        /* 只比对"收到的那些字节": 一次短读不等于内容错 (TCP 是流) */
-        LOG_I("#%d 发 %u B / %u us, 收 %u B / %u us (%s), 内容%s",
-              round, sent, (unsigned)us_send, got, (unsigned)us_recv,
-              W5500_Sock_StatusStr(st),
-              (got == 0) ? "未收到"
-                         : (memcmp(s_test_tx, s_test_rx, got) == 0 ? "一致" : "不一致"));
-
-        W5500_Sock_Close(NET_TEST_SOCK);
-        vTaskDelay(pdMS_TO_TICKS(NET_TEST_GAP_MS));
-    }
-
-    net_burst_bench();      /* 再量一次: 与开机那次对比, 看抢占的影响 */
-    LOG_I("--- 冒烟结束 ---");
-}
-
 
 /* ================================================================
  * 任务
@@ -249,10 +128,10 @@ void vNetTask(void *pvParameters)
             last_tick = now;
             net_tick();
 
-            /* D2 脚手架: 链路一起来就跑一次冒烟, 只跑一次 */
-            if (!s_smoke_done && (s_phy_last & W5500_PHY_LNK) != 0) {
-                s_smoke_done = 1;
-                net_smoke_test();
+            /* W2 自检脚手架: 链路一起来就跑一次 (见 net_selftest.c, D5 删) */
+            if (!s_selftest_done && (s_phy_last & W5500_PHY_LNK) != 0) {
+                s_selftest_done = 1;
+                NetSelfTest_Run();
             }
         }
     }

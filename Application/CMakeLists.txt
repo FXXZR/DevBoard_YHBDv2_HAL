@@ -47,6 +47,7 @@ target_sources(app PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_test.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_disp.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/task_net.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Tasks/net_selftest.c   # W2 自检脚手架 (D5 删)
 )
 
 # ---- 头文件路径 ----
