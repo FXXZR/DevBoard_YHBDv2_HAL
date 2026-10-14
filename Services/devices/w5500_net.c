@@ -21,25 +21,6 @@
 #include <stddef.h>     /* NULL */
 
 /* ================================================================
- * 静态网络参数
- *
- * 场景: 板子直连 PC 网口 (PC 网卡配 192.168.1.1/24)。这样 Wireshark 既是
- * 对端又是抓包点, 板子的每个报文都看得到 —— 经过路由器就只能抓广播了。
- *
- * MAC 首字节 0x02 = 本地管理 + 单播, 不会撞到任何真实厂商的 OUI。
- * 换环境只改这张表。
- * ================================================================ */
-
-static const wiz_NetInfo kNetStatic = {
-    .mac  = { 0x02, 0x08, 0xDC, 0x01, 0x02, 0x03 },
-    .ip   = { 192, 168, 1, 100 },
-    .sn   = { 255, 255, 255, 0 },
-    .gw   = { 192, 168, 1, 1 },
-    .dns  = { 192, 168, 1, 1 },     /* 接 DNS 时改成真实 DNS 服务器 */
-    .dhcp = NETINFO_STATIC,
-};
-
-/* ================================================================
  * 内部
  * ================================================================ */
 
@@ -48,6 +29,10 @@ static const wiz_NetInfo kNetStatic = {
 #define W5500_CLOSE_TIMEOUT_MS          2000
 /* 发完强制 CLOSE 命令后再给芯片的时间 (命令本身是立即生效的) */
 #define W5500_CLOSE_FORCE_WAIT_MS       100
+/* 发出 FIN 后等对端也关的期限 —— 对端应用通常毫秒级就跟着关, 这里只是兜底 */
+#define W5500_FIN_WAIT_MS               500
+
+/* TCP 的打开 flag 只开 SF_TCP_NODELAY —— 理由与警告见 W5500_Sock_TcpOpen */
 
 /* Sn_SR (socket 状态寄存器) 的取值 → 可读名字。
  * 这张表就是 W5500 的 TCP 状态机 —— 排查连接问题时看它比看代码快。 */
@@ -65,6 +50,11 @@ static const char *s_state_str(uint8_t sr)
     case SOCK_TIME_WAIT:   return "TIME_WAIT";
     case SOCK_CLOSE_WAIT:  return "CLOSE_WAIT";
     case SOCK_LAST_ACK:    return "LAST_ACK";
+    /* 这三位不是 TCP 状态机的状态, 而是"这个 socket 不是 TCP" —— 少了它们,
+     * UDP 的 socket 会一律显示成 "?", 排查时像是读到了坏值 */
+    case SOCK_UDP:         return "UDP";
+    case SOCK_IPRAW:       return "IPRAW";
+    case SOCK_MACRAW:      return "MACRAW";
     default:               return "?";
     }
 }
@@ -96,6 +86,17 @@ static int s_wait_closed(uint8_t sn, uint32_t timeout_ms)
         vTaskDelay(1);
     }
     return 1;
+}
+
+/**
+ * @brief 这个状态算不算"连接已经建起来了"
+ * @note  这一族状态下的 socket 必须【先发 FIN 再关】—— 见 W5500_Sock_Close。
+ *        SYNSENT/SYNRECV 不在其中: 连接都还没建起来, 没有对端要通知。
+ */
+static int s_is_connected_state(uint8_t sr)
+{
+    return sr == SOCK_ESTABLISHED || sr == SOCK_CLOSE_WAIT || sr == SOCK_FIN_WAIT
+        || sr == SOCK_CLOSING || sr == SOCK_LAST_ACK;
 }
 
 /**
@@ -137,12 +138,16 @@ static int netinfo_equal(const wiz_NetInfo *a, const wiz_NetInfo *b)
  * 公开 API
  * ================================================================ */
 
-void W5500_Net_ConfigStatic(void)
+void W5500_Net_Apply(const wiz_NetInfo *cfg)
 {
     wiz_NetInfo back;
 
+    if (cfg == NULL) {
+        return;
+    }
+
     /* 上游签名是非 const 指针 (它只读不改), 这里投一次去掉 const */
-    wizchip_setnetinfo((wiz_NetInfo *)&kNetStatic);
+    wizchip_setnetinfo((wiz_NetInfo *)cfg);
     wizchip_getnetinfo(&back);      /* 从寄存器读回 —— 顺便验证写入真的落地了 */
 
     LOG_I("mac %02X:%02X:%02X:%02X:%02X:%02X",
@@ -154,9 +159,79 @@ void W5500_Net_ConfigStatic(void)
           back.gw[0], back.gw[1], back.gw[2], back.gw[3],
           back.dns[0], back.dns[1], back.dns[2], back.dns[3]);
 
-    if (!netinfo_equal(&kNetStatic, &back)) {
+    if (!netinfo_equal(cfg, &back)) {
         LOG_W("netinfo 读回与写入不一致 —— SPI 帧有错时寄存器写入会被静默丢弃");
     }
+}
+
+/* ================================================================
+ * 中断状态
+ *
+ * 芯片的 IR / Sn_IR 都是【写 1 清位】: 想把某一位清掉, 就把它按原样写回去。
+ * 少了写回这一步, INT 线会一直低, 任务的处理循环就永远退不出去。
+ *
+ * ⚠️ 但 Sn_IR 的写回必须【只写我们认领的位】—— 全清会把 ioLibrary 的
+ *    SENDOK/TIMEOUT 一起抹掉, 见 W5500_Sock_IntClear 的说明。
+ * ================================================================ */
+
+void W5500_Int_Enable(void)
+{
+    /* 全局位只放行我们真有话可说的两个: IP 冲突 / UDP 不可达。
+     * 其余 (PPPoE / magic packet) 本工程用不到, 放了也只会多出空唤醒。 */
+    setIMR(IM_IR7 | IM_IR6);
+
+    /* socket 汇总: 8 个全放行 —— 具体上报哪些事件由各 socket 自己的 Sn_IMR
+     * 决定, 而 Sn_IMR 在 socket 打开时由本模块写成 W5500_SOCK_IR_OWNED
+     * (见 W5500_Sock_TcpOpen / UdpOpen), 这里不必逐个再设。 */
+    setSIMR(0xFF);
+}
+
+uint8_t W5500_Sock_IntPending(void)
+{
+    return getSIR();
+}
+
+uint8_t W5500_Sock_IntClear(uint8_t sn)
+{
+    uint8_t ir;
+
+    if (sn >= W5500_SOCK_COUNT) {
+        return 0;
+    }
+
+    ir = getSn_IR(sn) & W5500_SOCK_IR_OWNED;    /* 只认领我们这几位 */
+    if (ir != 0) {
+        /* 写回 → 清掉; 没认领的位写的是 0, 不受影响 (SENDOK/TIMEOUT 要留给
+         * ioLibrary 销账 —— 见头文件里为什么不能清) */
+        setSn_IR(sn, ir);
+    }
+    return ir;
+}
+
+uint8_t W5500_IntClear(void)
+{
+    uint8_t ir = getIR();   /* 同上, getIR 也只读 */
+
+    if (ir != 0) {
+        setIR(ir);
+    }
+    return ir;
+}
+
+void W5500_IntSnapshot(uint8_t sn, W5500_IntSnapshot_t *out)
+{
+    if (out == NULL) {
+        return;
+    }
+
+    out->ir     = getIR();
+    out->sir    = getSIR();
+    out->imr    = getIMR();
+    out->simr   = getSIMR();
+    out->sn_imr    = (sn < W5500_SOCK_COUNT) ? getSn_IMR(sn)    : 0;
+    out->sn_ir     = (sn < W5500_SOCK_COUNT) ? getSn_IR(sn)     : 0;
+    out->sn_sr     = (sn < W5500_SOCK_COUNT) ? getSn_SR(sn)     : 0;
+    out->sn_rx_rsr = (sn < W5500_SOCK_COUNT) ? (uint16_t)getSn_RX_RSR(sn) : 0;
 }
 
 /* ================================================================
@@ -207,17 +282,31 @@ const char *W5500_Sock_StatusStr(W5500_Sock_Status_t st)
     }
 }
 
-W5500_Sock_Status_t W5500_Sock_Open(uint8_t sn, uint16_t local_port)
+W5500_Sock_Status_t W5500_Sock_TcpOpen(uint8_t sn, uint16_t local_port)
 {
     if (sn >= W5500_SOCK_COUNT) {
         return W5500_SOCK_ERR_PARAM;
     }
 
-    /* socket() 要求 SIPR 非 0, 所以网络参数必须先配好。
-     * 返回负数说明命令被拒 (socket 状态不对 / 模式不支持)。 */
-    if (socket(sn, Sn_MR_TCP, local_port, 0) != (int8_t)sn) {
+    /* 与 UdpOpen 一致的前置检查。少了它, socket() 内部会先 close(sn),
+     * 对已连接的 socket 就是【静默关闭】—— 对端永远等不到 FIN, 会一直停在
+     * ESTABLISHED 上 (同 W5500_Sock_Close 里记的那个实测坑)。 */
+    if (getSn_SR(sn) != SOCK_CLOSED) {
         return W5500_SOCK_ERR_STATE;
     }
+
+    /* socket() 要求 SIPR 非 0, 所以网络参数必须先配好。
+     * flag 只开 NODELAY; ⚠️ 别加 SF_IO_NONBLOCK —— 这份 ioLibrary 的 recv()
+     * 在非阻塞下不管有没有数据都返回 SOCK_BUSY, 一个字节都读不出来。 */
+    if (socket(sn, Sn_MR_TCP, local_port, SF_TCP_NODELAY) != (int8_t)sn) {
+        return W5500_SOCK_ERR_STATE;
+    }
+
+    /* 中断屏蔽跟着 socket 一起建立 —— 它是 socket 的属性, 与角色 (客户端 /
+     * 服务端) 和连接状态都无关, 所以不放在 Connect 之后。两个打开函数都要设,
+     * 配套说明见头文件的 W5500_SOCK_IR_OWNED。 */
+    setSn_IMR(sn, W5500_SOCK_IR_OWNED);
+
     return W5500_SOCK_OK;
 }
 
@@ -284,23 +373,21 @@ int W5500_Sock_IsConnected(uint8_t sn)
     return getSn_SR(sn) == SOCK_ESTABLISHED;
 }
 
-W5500_Sock_Status_t W5500_Sock_Listen(uint8_t sn, uint16_t local_port)
+W5500_Sock_Status_t W5500_Sock_Listen(uint8_t sn)
 {
-    if (sn >= W5500_SOCK_COUNT || local_port == 0) {
+    if (sn >= W5500_SOCK_COUNT) {
         return W5500_SOCK_ERR_PARAM;
     }
-    if (getSn_SR(sn) != SOCK_CLOSED) {
-        return W5500_SOCK_ERR_STATE;
-    }
-
-    if (socket(sn, Sn_MR_TCP, local_port, 0) != (int8_t)sn) {
+    /* 与 Connect 同一套前置条件: 只认 TcpOpen 留下的 SOCK_INIT。
+     * 本函数【不】自己开 socket —— 建 socket 是 TcpOpen 的事。 */
+    if (getSn_SR(sn) != SOCK_INIT) {
         return W5500_SOCK_ERR_STATE;
     }
     if (listen(sn) != SOCK_OK) {
         return W5500_SOCK_ERR_STATE;
     }
 
-    LOG_I("sn%d 监听 %u 端口, Sn_SR = %s", sn, local_port, W5500_Sock_StateStr(sn));
+    LOG_I("sn%d 已监听, Sn_SR = %s", sn, W5500_Sock_StateStr(sn));
     return W5500_SOCK_OK;
 }
 
@@ -357,10 +444,13 @@ W5500_Sock_Status_t W5500_Sock_UdpOpen(uint8_t sn, uint16_t local_port)
     if (getSn_SR(sn) != SOCK_CLOSED) {
         return W5500_SOCK_ERR_STATE;
     }
+    /* UDP 的 flag 给 0: SF_TCP_NODELAY 在 UDP 下是 MMB (阻断组播), 语义不同 */
     if (socket(sn, Sn_MR_UDP, local_port, 0) != (int8_t)sn) {
         return W5500_SOCK_ERR_STATE;
     }
-
+    /* UDP 也同样屏蔽 SENDOK/TIMEOUT */
+    setSn_IMR(sn, W5500_SOCK_IR_OWNED);   /* 同 TcpOpen */
+   
     LOG_I("sn%d UDP 打开, 本地端口 %u", sn, local_port);
     return W5500_SOCK_OK;
 }
@@ -417,7 +507,7 @@ W5500_Sock_Status_t W5500_Sock_UdpRecvFrom(uint8_t sn, uint8_t *buf, uint16_t le
     TickType_t limit = pdMS_TO_TICKS(timeout_ms);
 
     for (;;) {
-        /* RX_RSR != 0 表示至少有一个完整包 (含 8 字节包头) 躺在缓冲里 */
+        /* 缓冲里有字节就算就绪 —— 包没收完整时 recvfrom() 内部会等它收完 */
         if ((uint16_t)getSn_RX_RSR(sn) != 0) {
             break;
         }
@@ -441,6 +531,9 @@ W5500_Sock_Status_t W5500_Sock_UdpRecvFrom(uint8_t sn, uint8_t *buf, uint16_t le
 
 void W5500_Sock_Close(uint8_t sn)
 {
+    /* ★ 为什么自己发命令而不用 ioLibrary 的 disconnect(): 它发完 DISCON 后是
+     *   `while (Sn_SR != SOCK_CLOSED)` 的【无 yield 忙等】, 对端不可达时芯片要
+     *   先耗完 TCP 重传才回 CLOSED (按 _RTR_/_RCR_ 是几十秒),在RTOS环境下不建议用 */
     uint8_t sr;
 
     if (sn >= W5500_SOCK_COUNT) {
@@ -449,27 +542,42 @@ void W5500_Sock_Close(uint8_t sn)
 
     sr = getSn_SR(sn);
 
-    /* ★ 已连接时必须先 disconnect() —— 这是【发 FIN 告诉对端】的那条路。
-     *
-     * 只调 close() 的后果实测过: 芯片本地进入 CLOSED, 但**对端一个字节都
-     * 收不到**, 它会一直停在 ESTABLISHED 占着那条连接。于是我们的下一次
-     * 连接虽然能握手成功 (内核 backlog 会自动回 SYN-ACK), 但对端应用
-     * accept 不到、永远读不到数据 —— 现象是"连上了却收不到任何回包",
-     * 而且抓包看到的全是正常握手, 极难往"上一次没关干净"上想。
-     *
-     * SYNSENT / SYNRECV (连接都没建起来) 不用 DISCON, 直接 CLOSE 中止。 */
-    if (sr == SOCK_ESTABLISHED || sr == SOCK_CLOSE_WAIT || sr == SOCK_FIN_WAIT
-        || sr == SOCK_CLOSING || sr == SOCK_LAST_ACK) {
-        disconnect(sn);
+    /* ★ 已连接时走正常挥手 DISCON —— 这是【发 FIN 告诉对端】的那条路 */
+    if (s_is_connected_state(sr)) {
+        setSn_CR(sn, Sn_CR_DISCON);
+        s_wait_cmd_done(sn);
+
+        /* ★ 自己带期限等, 等不到就【强制关闭】: 不能直接调 close(), 它内部是
+         *   无超时忙等, 对端不可达时网络任务整个卡死 (见 issue-log 006)。 */
+        if (s_wait_closed(sn, W5500_CLOSE_TIMEOUT_MS)) {
+            close(sn);
+            return;
+        }
+
+        /* ★★ 重读一次状态再决定 —— 这两秒里芯片可能【自己】把连接建起来了
+         *    (对端的 SYN-ACK 只是来晚了), 见 issue-log 007。 */
+        sr = getSn_SR(sn);
+        if (s_is_connected_state(sr)) {
+            LOG_W("sn%d 超时放弃时芯片已进 %s, 先发 FIN 通知对端", sn, s_state_str(sr));
+            setSn_CR(sn, Sn_CR_DISCON);
+            s_wait_cmd_done(sn);
+            if (s_wait_closed(sn, W5500_FIN_WAIT_MS)) {
+                close(sn);
+                return;
+            }
+        }
+        /* 只在【确实还没回到 CLOSED】时才告警: 上面两次等待之间, 芯片可能自己关掉了 */
+        if (getSn_SR(sn) != SOCK_CLOSED) {
+            LOG_W("sn%d 等不到 CLOSED (对端不可达?), 发 CLOSE 强制关闭", sn);
+        }
     }
 
-    /* ★ 自己带期限等, 等不到就【强制关闭】。
-     *
-     * 不能直接调 close(): 它内部是无超时等待, 对端不可达时(拔网线、对端消失)
-     * 芯片要先耗完 TCP 重传才回 CLOSED —— 实测那段期间网络任务整个卡死,
-     * 日志直接停住。而 Sn_CR_CLOSE 是"立即关", 不等对端回应。 */
-    if (!s_wait_closed(sn, W5500_CLOSE_TIMEOUT_MS)) {
-        LOG_W("sn%d 等不到 CLOSED (对端不可达?), 发 CLOSE 强制关闭", sn);
+    /* 走到这里有两种情况:
+     *   ① 已连接但挥手没走完 (对端消失/不回应);
+     *   ② 本来就是 LISTEN / UDP 这类【没有对端要通知】的状态 —— 芯片不会自己
+     *      回 CLOSED, 等它两秒纯属浪费, 还会打一行"对端不可达?"的误导告警。
+     * 两者都该直接强关: Sn_CR_CLOSE 是"立即关", 不等对端回应。 */
+    if (getSn_SR(sn) != SOCK_CLOSED) {
         setSn_CR(sn, Sn_CR_CLOSE);
         s_wait_cmd_done(sn);
         /* 兜底再等一下; 仍未 CLOSED 说明是芯片级故障, 下面 close() 会阻塞,
@@ -495,7 +603,9 @@ W5500_Sock_Status_t W5500_Sock_Send(uint8_t sn, const uint8_t *buf, uint16_t len
     TickType_t t0    = xTaskGetTickCount();
     TickType_t limit = pdMS_TO_TICKS(timeout_ms);
 
-    /* 先等发送缓冲腾出 len 字节 —— 这一段就是 ioLibrary 无界自旋的那个等待 */
+    /* 先等发送缓冲腾出 len 字节 —— 这段就是 ioLibrary 无界自旋的那个等待。
+     * 缓冲够了再调 send(); 但它开头的 sock_is_sending 分支不受 io_mode 约束,
+     * 阻塞模式下也会返回 SOCK_BUSY(0) —— 那是"还没就绪", 要重试不是报错。 */
     for (;;) {
         uint8_t  sr = getSn_SR(sn);
         uint16_t fsr;
@@ -510,25 +620,24 @@ W5500_Sock_Status_t W5500_Sock_Send(uint8_t sn, const uint8_t *buf, uint16_t len
 
         fsr = (uint16_t)getSn_TX_FSR(sn);
         if (fsr >= len) {
-            break;
+            int32_t n = send(sn, (uint8_t *)buf, len);
+
+            if (n != SOCK_BUSY) {
+                if (n < 0) {
+                    return W5500_SOCK_ERR_STATE;
+                }
+                *sent = (uint16_t)n;
+                return W5500_SOCK_OK;
+            }
         }
 
         if ((xTaskGetTickCount() - t0) >= limit) {
-            LOG_W("sn%d 发送缓冲不够 (剩 %u 需 %u), 等满 %u ms 放弃",
+            LOG_W("sn%d 发送缓冲不够 (剩 %u 需 %u), 等满 %u ms 发不出去",
                   sn, fsr, len, timeout_ms);
             return W5500_SOCK_ERR_TIMEOUT;
         }
         vTaskDelay(1);
     }
-
-    /* 到这里 send() 内部第一轮就通过, 不会再自旋 */
-    int32_t n = send(sn, (uint8_t *)buf, len);
-    if (n <= 0) {
-        return W5500_SOCK_ERR_STATE;
-    }
-
-    *sent = (uint16_t)n;
-    return W5500_SOCK_OK;
 }
 
 W5500_Sock_Status_t W5500_Sock_Recv(uint8_t sn, uint8_t *buf, uint16_t len,

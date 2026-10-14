@@ -6,7 +6,11 @@
  *          总线互斥锁和片选控制。本文件不直接碰 SPI。
  */
 
+#define LOG_TAG "W5500"
+#include "log.h"
+
 #include "w5500_drv.h"
+
 #include "bsp_w5500_hw.h"
 #include "bsp_systick.h"
 #include "bsp_assert.h"
@@ -91,18 +95,25 @@ W5500_Status_t W5500_Drv_Init(void)
     if (ver != W5500_VERSION_EXPECTED) {
         /* 全 0 / 全 1 说明 MISO 恒定, SPI 根本没有从机在应答,
          * 方向是查接线/供电/片选, 而不是查芯片型号。 */
-        if (ver == 0x00 || ver == 0xFF) return W5500_ERR_SPI;
-        return W5500_ERR_NOT_FOUND;
+        W5500_Status_t st = (ver == 0x00 || ver == 0xFF) ? W5500_ERR_SPI
+                                                         : W5500_ERR_NOT_FOUND;
+        LOG_E("init 失败: %s (VERSIONR=0x%02X)", W5500_Drv_StatusStr(st), ver);
+        return st;
     }
 
     /* ⑤ 分配 socket 收发缓冲。⚠️ 内部含一次软件复位, 会把 PHYCFGR 打回
      *    默认值 —— 所以必须在 ⑥ 之前做, 顺序反了 PHY 配置会被悄悄抹掉。 */
     if (wizchip_init((uint8_t *)kSocketTxSize, (uint8_t *)kSocketRxSize) != 0) {
+        LOG_E("init 失败: %s", W5500_Drv_StatusStr(W5500_ERR_MEMCFG));
         return W5500_ERR_MEMCFG;
     }
 
     /* ⑥ PHY 工作模式 —— 得到这里做, 否则会被 ⑤ 的软复位清掉 */
     w5500_phy_config();
+
+    /* ⑦ 结果快照 —— 此刻自协商还没完成 (要 1~2 秒), 所以多半是 0xFA,
+     *    稍后由 vNetTask 报出 0xFF */
+    LOG_I("init ok, VERSIONR=0x%02X, PHYCFGR=0x%02X", ver, W5500_Drv_ReadPhyCfg());
 
     return W5500_OK;
 }

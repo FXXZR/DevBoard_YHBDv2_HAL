@@ -11,6 +11,8 @@
 #ifndef __NET_SELFTEST_H__
 #define __NET_SELFTEST_H__
 
+#include <stdint.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -21,6 +23,30 @@ extern "C" {
  *        每一组都要 PC 侧的 tools/net_peer.py 配合, 具体命令打在日志里。
  */
 void NetSelfTest_Run(void);
+
+/* ================================================================
+ * D4: 中断驱动的 UDP 收包
+ *
+ * 与上面那组"阻塞式自检"是两种形态 —— 这一组【不阻塞】, 它挂在网络任务的
+ * 事件循环上: 平时任务睡着, W5500 的 INT 拉低 → ISR 置事件位 → 任务醒来
+ * 收包。正是产品代码该有的样子。
+ *
+ * 观察点: ISR 次数 vs 实际收包数。前者远小于后者是正常的 —— 一次唤醒把
+ * 缓冲里的包全搬走, 中断被"合并"了; 反过来 (ISR 多于包) 说明有空唤醒,
+ * 要回去查标志清除顺序。
+ * ================================================================ */
+
+/** @brief 打开演示 socket 并打一条 PC 侧命令提示 (链路起来后调一次) */
+void NetIntTest_Start(void);
+
+/** @brief ISR 里的一句记账 (次数 + 时间戳), 只读几个变量, 不做别的事 */
+void NetIntTest_OnIsr(void);
+
+/** @brief 事件循环里发现某个 socket 有数据时调用 (非本演示的 socket 会被忽略) */
+void NetIntTest_OnRecv(uint8_t sn);
+
+/** @brief 周期服务 (1Hz): 一次突发结束时打总账 */
+void NetIntTest_Report(void);
 
 #ifdef __cplusplus
 }

@@ -25,12 +25,12 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 依赖只允许向下，不允许成环。完整规范（CMake 目标依赖、移植层归属判据）见
 [conventions.md](Document/conventions.md#分层规则-layering-rule)。
 
-| 层 | 放什么 | 不许放什么 |
-| --- | --- | --- |
-| `Application/` | 业务逻辑、RTOS 任务、移植钩子 | 直接调 HAL |
-| `Services/` | `log/` 分级日志；`bus/` 总线服务（锁/事务边界）；`devices/` 器件协议驱动 | 业务逻辑 |
-| `Middleware/` | 第三方库（FreeRTOS / FatFs / LVGL / ioLibrary）—— **只读** | 项目自己的代码 |
-| `BSP/` | 板级硬件资源、raw 传输 | RTOS API、第三方库 |
+| 层               | 放什么                                                                         | 不许放什么         |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------ |
+| `Application/` | 业务逻辑、RTOS 任务、移植钩子                                                  | 直接调 HAL         |
+| `Services/`    | `log/` 分级日志；`bus/` 总线服务（锁/事务边界）；`devices/` 器件协议驱动 | 业务逻辑           |
+| `Middleware/`  | 第三方库（FreeRTOS / FatFs / LVGL / ioLibrary）——**只读**              | 项目自己的代码     |
+| `BSP/`         | 板级硬件资源、raw 传输                                                         | RTOS API、第三方库 |
 
 - **BSP 不得依赖 RTOS**；需要锁的场景由 `Services/bus` 提供
 - **Services 可用 FreeRTOS，但只允许出现在 `.c` 里**（头文件不得含 RTOS 类型）。**不做 OSAL 包装**
@@ -83,12 +83,12 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 ## Available Skills
 
-| 技能              | 用途                                                  |
-| ----------------- | ----------------------------------------------------- |
+| 技能              | 用途                                                                         |
+| ----------------- | ---------------------------------------------------------------------------- |
 | `/build-stm32`  | CMake + Ninja 编译 (Debug 默认 / Release / 增量 / 首次 / 完全重建 / 生成HEX) |
-| `/flash-stm32`  | PyOCD 烧录固件 (`release` = 烧 Release 版, `safe` = 完整预检) |
-| `/reset-stm32`  | 硬件复位 + 串口启动日志捕获 (端口自动识别 CH340, 不写死 COM 号) |
-| `/serial-debug` | 实时串口日志监控窗口 (Git Bash tail -f)               |
+| `/flash-stm32`  | PyOCD 烧录固件 (`release` = 烧 Release 版, `safe` = 完整预检)            |
+| `/reset-stm32`  | 硬件复位 + 串口启动日志捕获 (端口自动识别 CH340, 不写死 COM 号)              |
+| `/serial-debug` | 实时串口日志监控窗口 (Git Bash tail -f)                                      |
 
 > 完整 API 参考见 [Document/skills-reference.md](Document/skills-reference.md)
 
@@ -96,17 +96,17 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 ## Current Firmware Behavior
 
-`main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → W5500 通路自检 + 静态网络参数 → 启动 FreeRTOS 调度器。
+`main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → 启动 FreeRTOS 调度器。
 
-当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（网络任务，当前 1Hz 轮询 PHYCFGR，W2 起接管 socket）。
+当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（网络任务，持有 W5500 的**全生命周期** —— 上电、配网、socket 层）。
 
 ---
 
 ## Reference Documents
 
-| 文档                                               | 内容                                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 文档                                                 | 内容                                                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | [project-reference.md](Document/project-reference.md) | 架构图、Key Files 清单、Pin Map、Clock Tree、HAL 模块表、Memory Layout、Build Flags、目录规划、Firmware Size、Debug 配置 |
-| [conventions.md](Document/conventions.md)             | 完整编码规范 (分层/宏/API/日志与串口/Git 提交/初始化)                                                                                    |
+| [conventions.md](Document/conventions.md)             | 完整编码规范 (分层/宏/API/日志与串口/Git 提交/初始化)                                                                    |
 | [skills-reference.md](Document/skills-reference.md)   | 技能详细 API 参考                                                                                                        |
-| [issue-log.md](Document/issue-log.md)                 | 疑难问题记录 —— 已定位根因的问题: 现象/根因/修复/排查方法教训 (含"已排除"清单, 避免重走)                                    |
+| [issue-log.md](Document/issue-log.md)                 | 疑难问题记录 —— 已定位根因的问题: 现象/根因/修复/排查方法教训 (含"已排除"清单, 避免重走)                               |

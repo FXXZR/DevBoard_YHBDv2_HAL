@@ -55,8 +55,9 @@ int SpiBus_Lock(BSP_SPI_Bus_Id_t bus, uint32_t timeout_ms)
      *      FreeRTOS 自己的断言 (queue.c: "not (SUSPENDED && xTicksToWait != 0)"),
      *      而本工程的 configASSERT 接的是 panic 通道 —— 会直接停机/复位。
      *
-     * 这个分支是必需的: W5500 的启动自检在 main() 里跑, 会经由片选回调
-     * 走到这里。 */
+     * 现状: 调度器启动前已经没有 SPI 使用者 (W5500 上电归 vNetTask),
+     * 这一段留作兜底 —— 将来谁在 main() 里加一次 SPI 自检, 不至于撞上那个
+     * 断言。 */
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return 0;
 
     BSP_ASSERT(s_spi_mutex[bus] != NULL);       /* 忘了调 SpiBus_Init */

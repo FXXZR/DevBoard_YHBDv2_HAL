@@ -2,19 +2,23 @@
  * @file    net_selftest.c
  * @brief   网络自检脚手架 —— W2 的验证代码, 不是产品流程
  *
- * 三组自检, 每组都要 PC 侧 tools/net_peer.py 配合 (命令会打进日志):
+ * 前半 (①②③④⑤) 是【同步阻塞】的: 整段跑几十秒, 每组都要 PC 侧
+ * tools/net_peer.py 配合 (命令会打进日志):
  *
  *   ① UDP 收包统计   PC: net_peer.py udp --peer 192.168.1.100 --port 5002 --burst 1000
  *                    ← 丢包率决定"要不要给 W5500 接环形缓冲"
  *   ② TCP 客户端     PC: net_peer.py server --port 5000
  *   ③ TCP 服务端     PC: net_peer.py client --host 192.168.1.100 --port 5001
  *
- * socket 号分配: 0/1/2 —— DHCP 与 DNS 之后各要一个, 所以留出了后面的号。
+ * ⚠️ 阻塞期间任务主循环里的周期服务 (net_tick 的链路监控) 完全停摆 ——
+ *    实测拔网线时 PHYCFGR 一行都没打, 就是这个原因。临时脚手架可以这样,
+ *    但**产品的周期服务不能被长操作堵住** (D5 的 DHCP_run 同理)。
  *
- * ⚠️ 它是【同步阻塞】跑的 (整个自检 ~90 秒), 期间任务主循环里的周期服务
- *    (net_tick 的链路监控) 完全停摆 —— 实测拔网线时 PHYCFGR 一行都没打,
- *    就是这个原因。临时脚手架可以这样, 但**产品的周期服务不能被长操作堵住**
- *    (D5 的 DHCP_run 同理)。D4/D5 要把它改成状态机挂回主循环。
+ * 后半 (⑥) 是 D4 的【事件驱动】形态: 不阻塞, 挂在网络任务的事件循环上,
+ * 由 W5500 的 INT 引脚触发 —— 这才是产品代码该有的样子, 两组对照着看。
+ *
+ * socket 号分配: 0~4 归阻塞组, 5 归 ⑥ —— DHCP 与 DNS 之后各要一个, 所以
+ * 后面的号留了出来。
  */
 
 #define LOG_TAG "W5500"
@@ -22,6 +26,7 @@
 
 #include "net_selftest.h"
 #include "w5500_net.h"
+#include "bsp_w5500_hw.h"       /* 中断通路自检要读 INT 引脚电平 */
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -72,7 +77,7 @@ static W5500_Sock_Status_t s_connect_retry(uint8_t sn, uint32_t attempts)
     W5500_Sock_Status_t st = W5500_SOCK_ERR_TIMEOUT;
 
     for (uint32_t i = 1; i <= attempts; i++) {
-        st = W5500_Sock_Open(sn, 0);
+        st = W5500_Sock_TcpOpen(sn, 0);
         if (st == W5500_SOCK_OK) {
             st = W5500_Sock_Connect(sn, kPeerIp, SELFTEST_PEER_PORT,
                                     SELFTEST_TIMEOUT_MS);
@@ -229,13 +234,15 @@ static void net_tcp_server_test(void)
     LOG_I("    PC 侧执行: net_peer.py client --host 192.168.1.100 --port %u",
           SELFTEST_SRV_PORT);
 
-    if (W5500_Sock_Listen(SELFTEST_SRV_SOCK, SELFTEST_SRV_PORT) != W5500_SOCK_OK) {
+    if (W5500_Sock_TcpOpen(SELFTEST_SRV_SOCK, SELFTEST_SRV_PORT) != W5500_SOCK_OK
+        || W5500_Sock_Listen(SELFTEST_SRV_SOCK) != W5500_SOCK_OK) {
         LOG_E("监听失败, 跳过");
         return;
     }
 
     if (W5500_Sock_WaitConnected(SELFTEST_SRV_SOCK, 20000) != W5500_SOCK_OK) {
         LOG_W("没人连上来, 跳过回显");
+        W5500_Sock_Close(SELFTEST_SRV_SOCK);    //避免留下僵尸Listen socket (issue-log 008)
         return;
     }
 
@@ -378,7 +385,8 @@ static void net_tcp_stall_test(void)
     LOG_I("    PC 侧执行: net_peer.py client --host 192.168.1.100 --port %u --stall",
           SELFTEST_STALL_PORT);
 
-    if (W5500_Sock_Listen(SELFTEST_STALL_SOCK, SELFTEST_STALL_PORT) != W5500_SOCK_OK) {
+    if (W5500_Sock_TcpOpen(SELFTEST_STALL_SOCK, SELFTEST_STALL_PORT) != W5500_SOCK_OK
+        || W5500_Sock_Listen(SELFTEST_STALL_SOCK) != W5500_SOCK_OK) {
         LOG_E("监听失败, 跳过");
         return;
     }
@@ -406,6 +414,155 @@ static void net_tcp_stall_test(void)
               (unsigned long)(round - 1), (unsigned long)sent_total);
     }
     W5500_Sock_Close(SELFTEST_STALL_SOCK);
+}
+
+/* ================================================================
+ * ⑥ D4: 中断驱动的 UDP 收包
+ *
+ * 与 ① 是【同一件事的两种驱动方式】, 对照着看差别:
+ *
+ *   ① 阻塞轮询   任务缩在 recv 的等待循环里, 每 200ms 探一次缓冲。等不到
+ *                就干等, 期间什么也做不了。
+ *   ⑥ 中断驱动   任务平时睡在 xTaskNotifyWait 上 (不占 CPU、不轮询任何
+ *                寄存器), INT 一拉低就被唤醒, 搬完再回去睡。
+ *
+ * 量什么: ISR 次数 vs 实际收包数。前者远小于后者是正常的 —— 任务在搬包时
+ * INT 一直被拉低, 新到的包只把线维持在低、不产生新的下降沿, 也就是"中断
+ * 被合并"。反过来 (ISR 多于包) 说明有空唤醒, 得回去查标志清除顺序。
+ *
+ * ⚠️ 它【不】提升收包吞吐: D3 已实测瓶颈在 SPI 读取速度 (见 w2-plan §3),
+ *    中断换来的东西是【响应延迟】和【CPU 不被占着】, 不是更多包。
+ * ================================================================ */
+
+enum {
+    SELFTEST_INT_SOCK     = 5,      /* 0~4 被上面的阻塞组占着 */
+    SELFTEST_INT_PORT     = 5004,   /* 别跟 5000~5003 撞 */
+    SELFTEST_INT_QUIET_MS = 2000,   /* 静默这么久 = 一轮突发结束 */
+};
+
+static uint8_t  s_int_open;
+static uint32_t s_int_pkts;         /* 本轮收到的包数 */
+static uint32_t s_int_lost;         /* 按序号算出的缺口 */
+static uint32_t s_int_ooo;          /* 乱序或重复 */
+static uint32_t s_int_next_seq;
+static uint32_t s_int_isr_base;     /* 本轮起点处的 ISR 计数 (在每轮结束时取) */
+static int      s_int_armed = 1;    /* 1 = 等下一次突发的首包 */
+static TickType_t s_int_last_rx;
+
+/* ISR 侧记账 —— 由 task_net.c 的 ISR 回调调用, 只写两个变量 */
+static volatile uint32_t   s_isr_count;
+static volatile TickType_t s_isr_last_tick;
+
+void NetIntTest_Start(void)
+{
+    W5500_IntSnapshot_t snap;
+
+    if (W5500_Sock_UdpOpen(SELFTEST_INT_SOCK, SELFTEST_INT_PORT) != W5500_SOCK_OK) {
+        LOG_E("D4: UDP 打开失败, 跳过中断收包演示");
+        return;
+    }
+
+    s_int_open     = 1;
+    s_int_isr_base = s_isr_count;   /* 本轮的中断从这个计数开始算 */
+
+    /* 中断通路自检 —— 收不到中断时, 这行日志能立刻把范围缩到一半:
+     *   屏蔽位该是 IMR=0xC0 / SIMR=0xFF (由 W5500_Int_Enable 打开, 芯片复位
+     *   默认是 0x00 —— 忘了开就是这个现象: 什么都没发生); 空闲时引脚该是高。 */
+    W5500_IntSnapshot(SELFTEST_INT_SOCK, &snap);
+    LOG_I("中断通路: INT 引脚=%s, IR=0x%02X SIR=0x%02X IMR=0x%02X SIMR=0x%02X sn%u_IMR=0x%02X SR=%s",
+          BSP_W5500_HW_IntLevel() ? "高" : "低",
+          snap.ir, snap.sir, snap.imr, snap.simr, SELFTEST_INT_SOCK, snap.sn_imr,
+          W5500_Sock_StateStr(SELFTEST_INT_SOCK));
+
+    LOG_I("--- D4 中断收包: UDP 端口 %u 已开, 等 INT 唤醒 ---",
+          SELFTEST_INT_PORT);
+    /* 两个量级的对照: 小突发能全收下 (考验的是【响应速度】), 大突发会大批
+     * 丢在芯片缓冲里 (卡的是【SPI 搬出速度】, 与中断无关 —— 见 w2-plan §3)。
+     * 两个都跑一遍, 才看得出中断到底换来了什么。 */
+    LOG_I("    PC 侧执行 ①: net_peer.py udp --peer 192.168.1.100 --port %u --burst 10 --size 100 --no-recv",
+          SELFTEST_INT_PORT);
+    LOG_I("    PC 侧执行 ②: net_peer.py udp --peer 192.168.1.100 --port %u --burst 1000 --size 100 --no-recv",
+          SELFTEST_INT_PORT);
+}
+
+void NetIntTest_OnIsr(void)
+{
+    s_isr_count++;
+    s_isr_last_tick = xTaskGetTickCountFromISR();
+}
+
+void NetIntTest_OnRecv(uint8_t sn)
+{
+    uint8_t  from_ip[4];
+    uint16_t from_port;
+
+    if (!s_int_open || sn != SELFTEST_INT_SOCK) {
+        return;
+    }
+
+    /* 一次唤醒就把缓冲里的包全搬走 —— 芯片的 socket 缓冲只有 2KB, 留在里面
+     * 的每一包都在挤占后面来的包。超时给 0 表示"只探一次", 没有就收工。 */
+    for (;;) {
+        uint16_t got = 0;
+        W5500_Sock_Status_t st = W5500_Sock_UdpRecvFrom(sn, s_udp_rx, sizeof(s_udp_rx),
+                                                        0, &got, from_ip, &from_port);
+        if (st != W5500_SOCK_OK || got < 4) {
+            break;
+        }
+
+        uint32_t seq = ((uint32_t)s_udp_rx[0] << 24) | ((uint32_t)s_udp_rx[1] << 16)
+                     | ((uint32_t)s_udp_rx[2] << 8)  |  (uint32_t)s_udp_rx[3];
+
+        if (s_int_armed) {
+            s_int_armed = 0;
+            s_int_next_seq = seq;
+            /* ⚠️ ISR 基准点【不】在这里取: 叫醒我们的那次中断早就发生了
+             * (中断 → 任务被唤醒 → 走到这里), 在这里取基准会把本轮的中断
+             * 数记成 0。基准点在一轮结束时取 —— 见 NetIntTest_Report。 */
+
+            /* ★ 这一个数字才是 D4 换来的东西: 从 INT 拉低到数据被取走。
+             * 阻塞轮询模式下它最坏是一个服务周期 (1000ms), 中断模式下是个
+             * 位数毫秒 —— 省下的是响应时间, 不是带宽。 */
+            LOG_I("首包 seq=%u (%u B, 前 %u 个已丢在芯片缓冲里), 中断→取出 %u ms",
+                  seq, got, seq,
+                  (unsigned)((xTaskGetTickCount() - s_isr_last_tick) * portTICK_PERIOD_MS));
+        }
+
+        if (seq == s_int_next_seq) {
+            s_int_next_seq++;
+        } else if (seq > s_int_next_seq) {
+            s_int_lost += seq - s_int_next_seq;
+            s_int_next_seq = seq + 1;
+        } else {
+            s_int_ooo++;
+        }
+        s_int_pkts++;
+        s_int_last_rx = xTaskGetTickCount();
+    }
+}
+
+void NetIntTest_Report(void)
+{
+    uint32_t isr;
+
+    if (!s_int_open || s_int_pkts == 0) {
+        return;
+    }
+    if ((xTaskGetTickCount() - s_int_last_rx) < pdMS_TO_TICKS(SELFTEST_INT_QUIET_MS)) {
+        return;                     /* 还在收, 等这轮突发停下来 */
+    }
+
+    isr = s_isr_count - s_int_isr_base;
+    LOG_I("--- D4 收包: %u 包 / 中断 %u 次 (每中断 %u 包), 丢 %u, 乱序 %u ---",
+          s_int_pkts, isr, (isr != 0) ? (s_int_pkts / isr) : 0,
+          s_int_lost, s_int_ooo);
+
+    /* 复位, 等下一轮 —— 演示可以反复打, 不用重启板子。
+     * ISR 基准点在这里取: 此刻线已回到高、本轮的账都记完了, 于是下一轮的
+     * 中断计数就是从这一刻起算。 */
+    s_int_pkts = s_int_lost = s_int_ooo = 0;
+    s_int_armed    = 1;
+    s_int_isr_base = s_isr_count;
 }
 
 /* ================================================================

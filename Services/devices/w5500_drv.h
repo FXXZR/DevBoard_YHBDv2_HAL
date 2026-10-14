@@ -85,17 +85,26 @@ void W5500_Port_Register(void);
  *           ④ 读 VERSIONR 校验通路
  *           ⑤ wizchip_init —— 分配 socket 收发缓冲
  *           ⑥ PHY 工作模式配置
+ *           ⑦ 打一行结果日志 (VERSIONR / PHYCFGR)
  *
  *         ⚠️ ⑤ 必须在 ⑥ 之前: wizchip_init() 内部会做一次软件复位,
  *            而软件复位会把 PHYCFGR 打回默认值 (OPMD=0, 由硬件引脚决定模式)。
  *            顺序反了的话 PHY 配置会被悄悄抹掉, 现象是"链路一直起不来",
  *            而看代码完全合理。
  *
- *         内部含约 100ms 阻塞 (复位后等 PLL 锁定), 只在启动时调一次。
+ *         成功与失败都由本函数自己打进日志 (LOG_TAG "W5500"), 调用方只需
+ *         看返回值决定要不要继续往下走 —— 不用为了打日志再读一遍寄存器。
+ *
+ *         内部含约 100ms 阻塞 (复位后等 PLL 锁定), 由 vNetTask 在任务上下文
+ *         调用 —— 起不来它会 1Hz 重试 (见 task_net.c)。
  */
 W5500_Status_t W5500_Drv_Init(void);
 
-/** @brief 读芯片版本寄存器, W5500 应返回 0x04 */
+/**
+ * @brief  读芯片版本寄存器, W5500 应返回 0x04
+ * @note   Init 内部已经读过并打进日志了; 本函数供"事后重新探一次芯片还在不在"
+ *         (排查热插拔/掉电) 用。
+ */
 uint8_t W5500_Drv_ReadVersion(void);
 
 /**
@@ -108,7 +117,7 @@ uint8_t W5500_Drv_ReadVersion(void);
  */
 uint8_t W5500_Drv_ReadPhyCfg(void);
 
-/** @brief 状态码 → 可读字符串 (供上层打日志, 避免在 Services 里依赖 log) */
+/** @brief 状态码 → 可读字符串 (Init 用它拼失败日志; 调用方也可用于自己的错误路径) */
 const char *W5500_Drv_StatusStr(W5500_Status_t st);
 
 #ifdef __cplusplus
