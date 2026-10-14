@@ -84,9 +84,11 @@ uint8_t BSP_XPT2046_GetTouchPoint(BSP_XPT2046_Coordinate_t *pCoord,
 uint8_t BSP_XPT2046_IsPressed(void);
 
 /**
- * @brief  外部中断回调 (在 stm32f1xx_it.c 的 EXTI9_5_IRQHandler 中调用)
+ * @brief  触摸 EXTI 线 (PF9) 的处理入口
+ * @note   由 bsp_exti.c 的 EXTI9_5_IRQHandler 分发调用 —— 该向量与 W5500 的
+ *         INT (PG8) 共用, 所以向量本身不归本模块。业务代码不要直接调。
  */
-void BSP_XPT2046_EXTI_Callback(void);
+void BSP_XPT2046_ExtiHandler(void);
 
 #ifdef __cplusplus
 }
