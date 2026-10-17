@@ -45,6 +45,7 @@
 
 #include "task_net.h"
 #include "net_selftest.h"
+#include "net_dhcptest.h"
 #include "w5500_drv.h"
 #include "w5500_net.h"
 #include "bsp_w5500_hw.h"
@@ -64,8 +65,8 @@ static const wiz_NetInfo kNetCfg = {
     .ip   = { 192, 168, 1, 100 },
     .sn   = { 255, 255, 255, 0 },
     .gw   = { 192, 168, 1, 1 },
-    .dns  = { 192, 168, 1, 1 },     /* 接 DNS 时改成真实 DNS 服务器 */
-    .dhcp = NETINFO_STATIC,         /* 动态地址是另一条路: DHCP_init + 周期 DHCP_run */
+    .dns  = { 192, 168, 1, 1 },     /* 静态路径下的 DNS */
+    .dhcp = NETINFO_STATIC,         /* 默认仍走静态 —— 动态地址那条路见 net_dhcptest.c */
 };
 
 /* ================================================================
@@ -74,7 +75,10 @@ static const wiz_NetInfo kNetCfg = {
 
 /* 服务周期, 也是阻塞等待的超时。当前只做 PHY 链路轮询 —— 1Hz 足够观察自协商
  * 过程 (开销: 每周期一帧 4 字节 SPI 事务 + 一次任务唤醒)。
- * D5 接 DHCP 后要跟着 DHCP_run 的节奏收紧。 */
+ *
+ * ⚠️ 这里【不】挂 DHCP_run: 它整段阻塞 (ACK 之后还要等一轮 ARP 冲突检测),
+ *    塞进周期服务就等于把链路监控和收包一起停掉。D5 把它放在链路起来后的
+ *    一次性阻塞段里 —— 见 net_dhcptest.c。 */
 enum { TASK_NET_TICK_MS = 1000 };
 
 /* W5500 上电失败后的重试间隔 (每次重试内含约 100ms 复位等待) */
@@ -236,10 +240,17 @@ static void net_tick(void)
         s_phy_last = phy;
     }
 
-    /* W2 自检脚手架: 链路一起来就跑一次 (见 net_selftest.c, D5 删) */
+    /* W2 自检脚手架: 链路一起来就跑一次。
+     *
+     * ⚠️ 顺序是硬要求 —— DHCP 要在【有链路】之后才能发广播, 而它跑完会换掉
+     *    板子的地址, 所以后面开出来的演示 socket 用的已经是新地址了。 */
     if (!s_selftest_done && (s_phy_last & W5500_PHY_LNK) != 0) {
         s_selftest_done = 1;
-        NetSelfTest_Run();
+
+        /* D2/D3 的静态 IP 自检当前整段注释着 (见 net_selftest.c 入口),
+         * 想跑那一组时把下面两行换回来。 */
+        NetDhcpTest_Run();      /* D5: DHCP 拿地址 + DNS 解析 (net_dhcptest.c) */
+        //NetSelfTest_Run();
     }
     /* 自检跑完之后才开演示 socket —— 那一大段是阻塞的, 期间任务根本回不到
      * 事件循环, 开着也收不到东西 */

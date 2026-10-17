@@ -17,8 +17,8 @@
  * 后半 (⑥) 是 D4 的【事件驱动】形态: 不阻塞, 挂在网络任务的事件循环上,
  * 由 W5500 的 INT 引脚触发 —— 这才是产品代码该有的样子, 两组对照着看。
  *
- * socket 号分配: 0~4 归阻塞组, 5 归 ⑥ —— DHCP 与 DNS 之后各要一个, 所以
- * 后面的号留了出来。
+ * socket 号分配: 0~4 归阻塞组, 5 归 ⑥, 6/7 归 D5 的 DHCP / DNS
+ * (见 net_dhcptest.c)。
  */
 
 #define LOG_TAG "W5500"
@@ -453,9 +453,24 @@ static TickType_t s_int_last_rx;
 static volatile uint32_t   s_isr_count;
 static volatile TickType_t s_isr_last_tick;
 
+/**
+ * @brief 成组打印之间的排空间隙
+ * @note  日志环形缓冲只有 512 字节 (main.c 的 s_log_tx_buf), 115200 下每毫秒
+ *        只排掉约 11.5 字节。下面这一串连着打 5 行约 490 字节 —— 实测会溢出,
+ *        而 BSP_USART_Write 的语义是【装不下的直接扔】, 表现就是最后一行
+ *        "PC 侧执行 ②" 被拦腰截断, 而那正是要照着敲的命令。
+ */
+static void s_log_gap(void)
+{
+    vTaskDelay(pdMS_TO_TICKS(20));
+}
+
 void NetIntTest_Start(void)
 {
     W5500_IntSnapshot_t snap;
+    /* 板子的地址【从芯片读】而不是写死: 走 DHCP 时它是路由器发的, 每次实验
+     * 都可能不一样 —— 提示里写死就会把人带到错地址上, 白查半天。 */
+    uint8_t             ip[4];
 
     if (W5500_Sock_UdpOpen(SELFTEST_INT_SOCK, SELFTEST_INT_PORT) != W5500_SOCK_OK) {
         LOG_E("D4: UDP 打开失败, 跳过中断收包演示");
@@ -473,16 +488,21 @@ void NetIntTest_Start(void)
           BSP_W5500_HW_IntLevel() ? "高" : "低",
           snap.ir, snap.sir, snap.imr, snap.simr, SELFTEST_INT_SOCK, snap.sn_imr,
           W5500_Sock_StateStr(SELFTEST_INT_SOCK));
+    s_log_gap();
 
-    LOG_I("--- D4 中断收包: UDP 端口 %u 已开, 等 INT 唤醒 ---",
-          SELFTEST_INT_PORT);
+    getSIPR(ip);
+    LOG_I("--- D4 中断收包: 板子 %u.%u.%u.%u, UDP 端口 %u 已开, 等 INT 唤醒 ---",
+          ip[0], ip[1], ip[2], ip[3], SELFTEST_INT_PORT);
+    s_log_gap();
+
     /* 两个量级的对照: 小突发能全收下 (考验的是【响应速度】), 大突发会大批
      * 丢在芯片缓冲里 (卡的是【SPI 搬出速度】, 与中断无关 —— 见 w2-plan §3)。
      * 两个都跑一遍, 才看得出中断到底换来了什么。 */
-    LOG_I("    PC 侧执行 ①: net_peer.py udp --peer 192.168.1.100 --port %u --burst 10 --size 100 --no-recv",
-          SELFTEST_INT_PORT);
-    LOG_I("    PC 侧执行 ②: net_peer.py udp --peer 192.168.1.100 --port %u --burst 1000 --size 100 --no-recv",
-          SELFTEST_INT_PORT);
+    LOG_I("    PC 侧执行 ①: net_peer.py udp --peer %u.%u.%u.%u --port %u --burst 10 --size 100 --no-recv",
+          ip[0], ip[1], ip[2], ip[3], SELFTEST_INT_PORT);
+    s_log_gap();
+    LOG_I("    PC 侧执行 ②: net_peer.py udp --peer %u.%u.%u.%u --port %u --burst 1000 --size 100 --no-recv",
+          ip[0], ip[1], ip[2], ip[3], SELFTEST_INT_PORT);
 }
 
 void NetIntTest_OnIsr(void)
