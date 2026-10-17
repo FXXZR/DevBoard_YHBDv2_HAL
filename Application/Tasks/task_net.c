@@ -44,8 +44,6 @@
 #include "log.h"
 
 #include "task_net.h"
-#include "net_selftest.h"
-#include "net_dhcptest.h"
 #include "w5500_drv.h"
 #include "w5500_net.h"
 #include "bsp_w5500_hw.h"
@@ -66,7 +64,7 @@ static const wiz_NetInfo kNetCfg = {
     .sn   = { 255, 255, 255, 0 },
     .gw   = { 192, 168, 1, 1 },
     .dns  = { 192, 168, 1, 1 },     /* 静态路径下的 DNS */
-    .dhcp = NETINFO_STATIC,         /* 默认仍走静态 —— 动态地址那条路见 net_dhcptest.c */
+    .dhcp = NETINFO_STATIC,         /* 动态地址另走 DHCP_init + 周期 DHCP_run */
 };
 
 /* ================================================================
@@ -76,9 +74,9 @@ static const wiz_NetInfo kNetCfg = {
 /* 服务周期, 也是阻塞等待的超时。当前只做 PHY 链路轮询 —— 1Hz 足够观察自协商
  * 过程 (开销: 每周期一帧 4 字节 SPI 事务 + 一次任务唤醒)。
  *
- * ⚠️ 这里【不】挂 DHCP_run: 它整段阻塞 (ACK 之后还要等一轮 ARP 冲突检测),
- *    塞进周期服务就等于把链路监控和收包一起停掉。D5 把它放在链路起来后的
- *    一次性阻塞段里 —— 见 net_dhcptest.c。 */
+ * ⚠️ 周期服务里只放"快进快出"的活。任何会阻塞数百毫秒以上的协议流程
+ *    (DHCP 的 ARP 冲突检测、DNS 解析) 都要单独安排, 否则链路监控和收包
+ *    会一起停掉。 */
 enum { TASK_NET_TICK_MS = 1000 };
 
 /* W5500 上电失败后的重试间隔 (每次重试内含约 100ms 复位等待) */
@@ -88,7 +86,7 @@ enum { TASK_NET_RETRY_MS = 1000 };
 enum { TASK_NET_INT_RETRY_MS = 2 };
 
 /* 一次事件处理最多来回搬几趟。收包洪水时不能把主循环饿死: 周期服务
- * (链路监控 / D5 的 DHCP_run) 也得有机会跑。搬不完不要紧 —— 线一直低,
+ * (链路监控 / 以后接的业务服务) 也得有机会跑。搬不完不要紧 —— 线一直低,
  * 收尾会把等待超时改成 2ms, 马上回来接着搬。 */
 enum { TASK_NET_SOCK_ROUNDS = 8 };
 
@@ -108,10 +106,6 @@ enum {
 static uint8_t s_phy_last;
 static int     s_phy_first = 1;
 
-/* 自检只跑一次 (脚手架, 见 net_selftest.c) */
-static int     s_selftest_done;
-static int     s_intdemo_started;
-
 /* 任务自己的句柄 —— ISR 要拿它置事件位。在任务入口登记, 之后只读。 */
 static TaskHandle_t s_task;
 
@@ -122,7 +116,7 @@ static TaskHandle_t s_task;
 /**
  * @brief W5500 INT 引脚的 ISR 回调 (由 bsp_w5500_hw 从 EXTI9_5 里调进来)
  *
- * 只做两件事: 记一笔账 (D4 验证要拿它和收包数对比) 和置事件位。
+ * 只做一件事: 置事件位。
  *
  * 为什么用【事件位】而不是计数信号量: 位是累积的, 任务在处理上一次事件时
  * 又来的事件不会丢; 而且我们并不关心"来过几次中断" —— 芯片缓冲里有几包,
@@ -131,8 +125,6 @@ static TaskHandle_t s_task;
 static void net_int_isr(void)
 {
     BaseType_t woken = pdFALSE;
-
-    NetIntTest_OnIsr();         /* 脚手架: D4 的 ISR 计数与时间戳, D5 删 */
 
     xTaskNotifyFromISR(s_task, TASK_NET_EVT_SOCKET, eSetBits, &woken);
     portYIELD_FROM_ISR(woken);
@@ -151,9 +143,9 @@ static void net_int_isr(void)
  */
 static void net_sock_event(uint8_t sn, uint8_t ir)
 {
-    if ((ir & W5500_SOCK_IR_RECV) != 0) {
-        NetIntTest_OnRecv(sn);  /* 脚手架: D4 的 UDP 收包统计, D5 换成业务 */
-    }
+    /* RECV 位留给各 socket 的业务自己处理 (W3 起): 这里只做与业务无关的
+     * 连接状态跟踪, 不替任何 socket 读数据 —— 读哪个缓冲、读多少, 只有
+     * 打开它的那方知道。 */
     if ((ir & W5500_SOCK_IR_CON) != 0) {
         LOG_I("sn%u 连接建立", sn);
     }
@@ -191,7 +183,7 @@ static void net_global_event(uint8_t ir)
  *        再来一趟 (见那里的说明)。
  *
  * ★ 为什么要限量: 收包洪水时 SIR 会一直是满的, 无限循环等于把周期服务
- *   (链路监控 / D5 的 DHCP_run) 饿死。搬不完没关系, 线还低就马上回来。
+ *   (链路监控 / 以后接的业务) 饿死。搬不完没关系, 线还低就马上回来。
  */
 static void net_socket_service(void)
 {
@@ -239,27 +231,6 @@ static void net_tick(void)
         LOG_I("PHYCFGR 变化: 0x%02X -> 0x%02X", s_phy_last, phy);
         s_phy_last = phy;
     }
-
-    /* W2 自检脚手架: 链路一起来就跑一次。
-     *
-     * ⚠️ 顺序是硬要求 —— DHCP 要在【有链路】之后才能发广播, 而它跑完会换掉
-     *    板子的地址, 所以后面开出来的演示 socket 用的已经是新地址了。 */
-    if (!s_selftest_done && (s_phy_last & W5500_PHY_LNK) != 0) {
-        s_selftest_done = 1;
-
-        /* D2/D3 的静态 IP 自检当前整段注释着 (见 net_selftest.c 入口),
-         * 想跑那一组时把下面两行换回来。 */
-        NetDhcpTest_Run();      /* D5: DHCP 拿地址 + DNS 解析 (net_dhcptest.c) */
-        //NetSelfTest_Run();
-    }
-    /* 自检跑完之后才开演示 socket —— 那一大段是阻塞的, 期间任务根本回不到
-     * 事件循环, 开着也收不到东西 */
-    if (s_selftest_done && !s_intdemo_started) {
-        s_intdemo_started = 1;
-        NetIntTest_Start();
-    }
-
-    NetIntTest_Report();        /* 脚手架: 突发结束时打总账, D5 删 */
 }
 
 /* ================================================================

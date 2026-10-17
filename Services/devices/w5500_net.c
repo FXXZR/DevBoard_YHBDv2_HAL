@@ -153,7 +153,7 @@ void W5500_Net_Apply(const wiz_NetInfo *cfg)
     LOG_I("mac %02X:%02X:%02X:%02X:%02X:%02X",
           back.mac[0], back.mac[1], back.mac[2],
           back.mac[3], back.mac[4], back.mac[5]);
-    /* 标签跟着 .dhcp 字段走 —— 同一个函数也给 DHCP 租约用 (见 net_dhcptest.c),
+    /* 标签跟着 .dhcp 字段走 —— 这个函数同样用于写入 DHCP 租约,
      * 那种场合打 "static" 会把人带偏 */
     LOG_I("%s ip %u.%u.%u.%u / %u.%u.%u.%u, gw %u.%u.%u.%u, dns %u.%u.%u.%u",
           (back.dhcp == NETINFO_DHCP) ? "dhcp" : "static",
