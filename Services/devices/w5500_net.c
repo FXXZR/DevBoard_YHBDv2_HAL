@@ -153,7 +153,10 @@ void W5500_Net_Apply(const wiz_NetInfo *cfg)
     LOG_I("mac %02X:%02X:%02X:%02X:%02X:%02X",
           back.mac[0], back.mac[1], back.mac[2],
           back.mac[3], back.mac[4], back.mac[5]);
-    LOG_I("static ip %u.%u.%u.%u / %u.%u.%u.%u, gw %u.%u.%u.%u, dns %u.%u.%u.%u",
+    /* 标签跟着 .dhcp 字段走 —— 同一个函数也给 DHCP 租约用 (见 net_dhcptest.c),
+     * 那种场合打 "static" 会把人带偏 */
+    LOG_I("%s ip %u.%u.%u.%u / %u.%u.%u.%u, gw %u.%u.%u.%u, dns %u.%u.%u.%u",
+          (back.dhcp == NETINFO_DHCP) ? "dhcp" : "static",
           back.ip[0], back.ip[1], back.ip[2], back.ip[3],
           back.sn[0], back.sn[1], back.sn[2], back.sn[3],
           back.gw[0], back.gw[1], back.gw[2], back.gw[3],
@@ -180,10 +183,21 @@ void W5500_Int_Enable(void)
      * 其余 (PPPoE / magic packet) 本工程用不到, 放了也只会多出空唤醒。 */
     setIMR(IM_IR7 | IM_IR6);
 
-    /* socket 汇总: 8 个全放行 —— 具体上报哪些事件由各 socket 自己的 Sn_IMR
-     * 决定, 而 Sn_IMR 在 socket 打开时由本模块写成 W5500_SOCK_IR_OWNED
-     * (见 W5500_Sock_TcpOpen / UdpOpen), 这里不必逐个再设。 */
+    /* socket 汇总: 8 个全放行, 具体上报哪些事件由各 socket 的 Sn_IMR 决定 */
     setSIMR(0xFF);
+
+    /* 所有 socket 的 Sn_IMR 打底: 只上报我们认领的三位 (CON / DISCON / RECV)。
+     *
+     * ⚠️ 芯片复位默认是 0x1F, 含 SENDOK/TIMEOUT —— 那两位是 ioLibrary 的账本,
+     *    我们不清 (见 W5500_SOCK_IR_OWNED), 一旦漏进 SIR 就是 INT 线永远低、
+     *    网络任务 2ms 空转出不去。
+     *    放这里而不是各 Open 里: 库自己开的 socket (DHCP/DNS) 没人替它设;
+     *    而 Sn_IMR 是纯寄存器, socket()/close() 都不碰, 设一次就一直继承。
+     * ⚠️ 软复位 (wizchip_init / 库的 default_ip_conflict) 会把它打回 0x1F,
+     *    那之后必须重新调用本函数。 */
+    for (uint8_t sn = 0; sn < W5500_SOCK_COUNT; sn++) {
+        setSn_IMR(sn, W5500_SOCK_IR_OWNED);
+    }
 }
 
 uint8_t W5500_Sock_IntPending(void)
@@ -302,10 +316,7 @@ W5500_Sock_Status_t W5500_Sock_TcpOpen(uint8_t sn, uint16_t local_port)
         return W5500_SOCK_ERR_STATE;
     }
 
-    /* 中断屏蔽跟着 socket 一起建立 —— 它是 socket 的属性, 与角色 (客户端 /
-     * 服务端) 和连接状态都无关, 所以不放在 Connect 之后。两个打开函数都要设,
-     * 配套说明见头文件的 W5500_SOCK_IR_OWNED。 */
-    setSn_IMR(sn, W5500_SOCK_IR_OWNED);
+    /* Sn_IMR 由 W5500_Int_Enable() 统一打底, 这里不再重复 */
 
     return W5500_SOCK_OK;
 }
@@ -448,9 +459,8 @@ W5500_Sock_Status_t W5500_Sock_UdpOpen(uint8_t sn, uint16_t local_port)
     if (socket(sn, Sn_MR_UDP, local_port, 0) != (int8_t)sn) {
         return W5500_SOCK_ERR_STATE;
     }
-    /* UDP 也同样屏蔽 SENDOK/TIMEOUT */
-    setSn_IMR(sn, W5500_SOCK_IR_OWNED);   /* 同 TcpOpen */
-   
+    /* Sn_IMR 同 TcpOpen: 已由 W5500_Int_Enable() 统一打底 */
+
     LOG_I("sn%d UDP 打开, 本地端口 %u", sn, local_port);
     return W5500_SOCK_OK;
 }

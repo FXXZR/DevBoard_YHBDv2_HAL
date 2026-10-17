@@ -95,7 +95,7 @@ typedef enum {
 /**
  * @brief 本模块【认领】的 socket 中断位 —— 其余 (SENDOK/TIMEOUT) 归 ioLibrary
  * @note  这两个动作是配套的, 缺一不可:
- *          屏蔽  把它们挡在 SIR/INT 之外 (见 W5500_Sock_IntMask)
+ *          屏蔽  把它们挡在 SIR/INT 之外 (见 W5500_Int_Enable)
  *          不清  把它们留在 Sn_IR 里给库销账 (见 W5500_Sock_IntClear)
  *        只屏蔽不清 = 安全; 只不清不屏蔽 = INT 线永远低。
  */
@@ -104,8 +104,12 @@ enum {
 };
 
 /**
- * @brief  打开芯片的中断上报 (写 IMR / SIMR)
+ * @brief  打开芯片的中断上报 (写 IMR / SIMR / 8 个 socket 的 Sn_IMR)
  * @note   ⚠️ 必须显式调用, 没有别的地方会替你开。
+ *
+ *         同时给所有 socket 的 Sn_IMR 打底成 W5500_SOCK_IR_OWNED ——
+ *         于是任何 socket (含 ioLibrary 自己开的 DHCP/DNS) 都只上报我们认领
+ *         的三位, 各 Open 函数不再重复设。理由见 .c 里的注释。
  *
  *         W5500 三个屏蔽寄存器的复位默认值【不一样】, 这是最容易踩的一脚:
  *             Sn_IMR  = 0x1F  全开   ← 所以看着像"中断本来就是开的"
@@ -180,7 +184,7 @@ void W5500_IntSnapshot(uint8_t sn, W5500_IntSnapshot_t *out);
  * ================================================================ */
 
 /**
- * @brief  写入静态网络参数
+ * @brief  写入网络参数 (静态配置或 DHCP 租约)
  * @param  cfg  参数表 (为 NULL 时直接返回) —— 直接收 ioLibrary 的 wiz_NetInfo
  * @note   参数是【部署数据】(哪台设备用哪个地址): 表放应用层 (见 task_net.c),
  *         本模块只负责"写进去"。将来接 NVM/SD 读配置时换的是表, 这个 API 不动。
