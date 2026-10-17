@@ -10,7 +10,7 @@
 - **Build system**: CMake 3.22+ + Ninja
 - **C standard**: C11 (gnu11 extensions)
 - **Output**: `build/Debug/HAL_TEST_Board.elf`
-- **Current firmware size**: 315600 B FLASH (60.20%), 55072 B RAM (84.03%) — Debug
+- **Current firmware size**: 321068 B FLASH (61.24%), 55088 B RAM (84.06%) — Debug（W2 收尾）
 
 ## Architecture
 
@@ -126,6 +126,12 @@ CMake 目标与依赖：
 | PC1       | ADC1_IN11                 | ADC input (potentiometer) |
 | PB6       | AF4 OD (I2C1_SCL)         | I2C SCL (EEPROM AT24C02)  |
 | PB7       | AF4 OD (I2C1_SDA)         | I2C SDA (EEPROM AT24C02)  |
+| PB13      | AF PP (SPI2_SCK)          | W5500 SCK                 |
+| PB14      | AF PP (SPI2_MISO)         | W5500 MISO                |
+| PB15      | AF PP (SPI2_MOSI)         | W5500 MOSI                |
+| PG9       | GPIO Output (active-low)  | W5500 CS                  |
+| PG15      | GPIO Output (active-low)  | W5500 RST                 |
+| PG8       | EXTI8 下降沿              | W5500 INT                 |
 | —        | LSE 32.768KHz             | RTC 时钟源 (外部晶振)     |
 | PA9/PA10  | USART1 TX/RX              | printf / serial debug     |
 | PA2/PA3   | USART2 TX/RX              | (reserved)                |
@@ -229,7 +235,7 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 | Directory | Purpose |
 | --------- | ------- |
-| `Application/Tasks/` | RTOS 任务 (task_init / led / disp / w5500) |
+| `Application/Tasks/` | RTOS 任务 (task_init / led / disp / net) |
 | `Application/Common/` | FreeRTOS 移植钩子 (`rtos_port_hooks.c`) |
 | `Application/Test/` | 外设验证模块 (`test.h` + 各外设 .c) |
 | `Application/DataManager/` | 全局状态管理 (空 — 预留) |
@@ -249,8 +255,8 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 | Region | Used | Total | % |
 | ------ | ---- | ----- | - |
-| FLASH | 330568 B | 512 KB | 63.05% |
-| RAM | 59728 B | 64 KB | 91.14% |
+| FLASH | 321068 B | 512 KB | 61.24% |
+| RAM | 55088 B | 64 KB | 84.06% |
 
 分阶段（FLASH）：
 
@@ -261,12 +267,46 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | + Services 层 + W5500 接入 | 315608 B |
 | + FatFs/LVGL 移植层迁入 Services（代码未增减，段排布位移） | 315600 B |
 | + 网络层（w5500_net：参数/socket/服务端/UDP） | 330568 B |
+| + D4 中断通路 / D5 DHCP+DNS 脚手架 | 340456 B |
+| + D6 清理测试脚手架（净删约 1000 行） | **321068 B** |
 
-> ⚠️ 内部 RAM 已用 91%。**新增缓冲区前先看余量。**
+> 内部 RAM 已用 84%。**新增缓冲区前先看余量。**
 > 当前占用大头（`nm --size-sort`）：两个 LVGL 绘图缓冲各 15360 B（共 30720 B，占已用
 > 的一半）、FreeRTOS 堆 16384 B。要腾空间优先动绘图缓冲（240×32 → 240×16 省 15KB），
 > 不要动 LVGL 内存池 —— 它已经在片外 SRAM 了。
 > Release 为 `-Os -g0`，通常显著小于 Debug。
+
+## 网络参数与 W5500 资源
+
+### 参数（部署数据，在 `Application/Tasks/task_net.c`）
+
+| 项 | 值 |
+| --- | --- |
+| MAC | `02:08:DC:01:02:03`（首字节 0x02 = 本地管理地址，不撞真实厂商 OUI） |
+| 默认路径 | 静态 `192.168.1.100/24`，gw/dns `192.168.1.1`（板子直连 PC 的场景） |
+| DHCP 实测 | 板子接路由器 LAN 口、PC 走 WiFi：租到 `192.168.5.128/24`，gw/dns `192.168.5.1`，租期 43200 s |
+
+静态 IP 仍是默认路径；DHCP/DNS 只在 W2 中做过一次性验证（驱动它的测试脚手架未进产品）。
+
+### socket 与缓冲
+
+- 共 **8 个 socket**，默认每个 **2 KB TX + 2 KB RX**（合计用满 16 KB + 16 KB），
+  分配表在 [w5500_drv.c](../Services/devices/w5500_drv.c)
+- 接入 DHCP / DNS 时**各需一个专属 socket 号**（`DHCP_init(sn, ...)` / `DNS_init(sn, ...)`），
+  应用只剩 6 个。DHCP 的 socket 在租约期内常开；DNS 的号即使只在调用期间打开也必须预留 ——
+  库每次进来都会强制 `socket()` 重开同号 socket
+- 这两个协议对缓冲要求很低：DHCP 报文固定 **548 B**，DNS 报文 **256 B** —— 各给 1 KB
+  即可，余量可留给业务 socket（W5500 的分配单位是 1 KB，最小 1 KB）
+
+### 中断通路
+
+- INT = **PG8 → EXTI8 下降沿**；与触摸的 PF9 共用 `EXTI9_5` 向量，由 `bsp_exti.c` 统一分发
+- ISR **只置任务通知位**，不碰 SPI；读 SIR/Sn_IR、搬数据都在任务里做
+- `Sn_IMR` 在 `W5500_Int_Enable()` 中对全部 8 个 socket 统一设成 `W5500_SOCK_IR_OWNED`
+  （CON/DISCON/RECV）。**不能留芯片默认的 0x1F** —— 其中的 SENDOK/TIMEOUT 是 ioLibrary
+  的账本，本工程不认领也不清，漏进 SIR 会让 INT 线永远低、任务 2 ms 空转
+- 软复位（`wizchip_init` / DHCP 的 `default_ip_conflict`）会把 `Sn_IMR` 打回 0x1F，
+  之后必须重新调用 `W5500_Int_Enable()`
 
 ## 实测数据（W5500 通路）
 
@@ -278,6 +318,15 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | TCP 握手 | 2~4 ms | 链路稳定后；刚上电可能撞对端地址探测，见 issue-log 005 |
 | ICMP 往返 | 1.19 ms | PC 侧抓包测得 |
 | UDP 全速收包 | **~2000 包/秒** | 上限由 SPI 吞吐决定，非调度 |
+| DHCP DORA 全程 | **686 ms** | DISCOVER→OFFER 30 ms（含 20 ms 轮询粒度） |
+| DHCP ACK 后的 IP 冲突检测 | **614 ms** | ARP 探测 ×3，`RTR 200 ms × RCR 3` |
+| DNS 解析（A 记录） | 6~56 ms | 取决于路由器缓存；最坏阻塞约 9 s |
+| 网络任务栈余量 | 266 字 / 512 | DNS 解析在库里吃栈（`parse_name` 局部数组 192 B） |
+
+> **ioLibrary 的 DHCP/DNS 有两个必须知道的接口特性**：
+> `default_ip_assign()` 只写 SIPR/SUBR/GAR，**不写 DNS** —— W5500 分支的 DNS 存在
+> host 侧静态数组里，要应用侧 `wizchip_setnetinfo()` 补写；`DNS_run()` 是忙等阻塞
+> （标称上限约 9 s，L2 不通时更久），且不校验应答的 ID/QR/来源，源端口固定为 0。
 
 > `W5500_SPI_TIMEOUT_MS` 取 50 ms 就是照第一行定的（最坏值 16.4 ms 的 3 倍余量）。
 > 这些数字都是 `-O0` 的 Debug 构建 —— 瓶颈是 HAL 逐字节轮询循环的 CPU 开销，

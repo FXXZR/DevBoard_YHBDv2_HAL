@@ -98,7 +98,9 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 `main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → 启动 FreeRTOS 调度器。
 
-当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（网络任务，持有 W5500 的**全生命周期** —— 上电、配网、socket 层）。
+当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（W5500 **全生命周期**：上电、静态配网、PHY 链路监控、INT 事件循环）。
+
+socket 封装（`W5500_Sock_*`，全部带超时）已就绪，业务 socket 从 W3 起接入。DHCP/DNS 只在 W2 中做过一次性实测，未进产品路径；网络参数与实测数据见 [project-reference.md](Document/project-reference.md#网络参数与-w5500-资源)。
 
 ---
 
