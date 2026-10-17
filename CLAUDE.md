@@ -22,7 +22,19 @@ cmake -B build/<Debug|Release> -G "Ninja" -DCMAKE_BUILD_TYPE=<Debug|Release> \
 
 ### 分层规则
 
-Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `test.h` 获取测试函数，通过 BSP 头文件访问硬件。
+依赖只允许向下，不允许成环。完整规范（CMake 目标依赖、移植层归属判据）见
+[conventions.md](Document/conventions.md#分层规则-layering-rule)。
+
+| 层               | 放什么                                                                         | 不许放什么         |
+| ---------------- | ------------------------------------------------------------------------------ | ------------------ |
+| `Application/` | 业务逻辑、RTOS 任务、移植钩子                                                  | 直接调 HAL         |
+| `Services/`    | `log/` 分级日志；`bus/` 总线服务（锁/事务边界）；`devices/` 器件协议驱动 | 业务逻辑           |
+| `Middleware/`  | 第三方库（FreeRTOS / FatFs / LVGL / ioLibrary）——**只读**              | 项目自己的代码     |
+| `BSP/`         | 板级硬件资源、raw 传输                                                         | RTOS API、第三方库 |
+
+- **BSP 不得依赖 RTOS**；需要锁的场景由 `Services/bus` 提供
+- **Services 可用 FreeRTOS，但只允许出现在 `.c` 里**（头文件不得含 RTOS 类型）。**不做 OSAL 包装**
+- **第三方库的移植层放 `Services/devices/`**，不放 Middleware
 
 ### 宏使用规范
 
@@ -38,43 +50,30 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 - API 传枚举 ID 而非指针: `void BSP_SPI_Init(BSP_SPI_Bus_Id_t id);`
 - 禁止 `extern` 全局总线实例
 
-### 日志与串口 (2026-09 起)
+### 日志与串口
 
-正式日志走 `Application/Common/log.h` 的 `LOG_E/W/I/D` 宏；`printf` **保留**，但只用于临时排查。
+- 正式日志走 `Services/log/log.h` 的 `LOG_E/W/I/D` 宏；`printf` 仅用于临时排查，提交前应改回 `LOG_x`
+- **两条输出通道，不要试图合并**：`BSP/bsp_assert`（零依赖 panic 输出）与 `Services/log`（分级日志）。
+  **BSP 层用不了 `LOG_x`，这是设计而非缺陷**
+- **串口归属** —— 每路串口只有一个使用者，应用层不得绕过 BSP 模块直接调 `bsp_usart`：
+  USART1=日志 / USART2=`bsp_rs485` / USART3=`bsp_esp8266` / USART4-5 空闲
+- **级别过滤**在预处理期完成。⚠️ Release 用 `LOG_LEVEL_WARN`（宏），**不是** `LOG_LVL_WARN`（enum 常量）
+  —— 后者在预处理期会被替换成 0，导致**全部日志消失**
 
-- **用法**：每个 `.c` 顶部 `#define LOG_TAG "XXX"` 再 `#include "log.h"`，之后直接 `LOG_I("x=%d", x)`
-- **printf 的定位**：可以随手写，但提交前应改回 `LOG_x` 或删除。理由不是"禁止"，而是 LOG 有分级、毫秒时间戳、模块标签、丢弃计数，printf 一样都没有；且 printf 在 ISR 里会长时间占用中断上下文
-- `printf` 与 LOG **共用同一路串口和同一个 TX 环形缓冲** —— `__io_putchar` 在 `log.c`（不在 BSP），端口由 `LOG_Init()` 决定，所以 printf 也是非阻塞的
-- **支持 `%f`**（Debug 构建链接 `-Wl,-u,_printf_float`，约 11KB Flash）。`-Wl,-u,_scanf_float` 已移除，工程不用 scanf 浮点
-- **耦合**：`-u _printf_float` 会拉入 `_vfprintf_r → _write_r → _write` 链路。想彻底禁用 printf 省那 11KB，必须把该 flag、`_write`（[syscalls.c](Start/syscalls.c)）、`__io_putchar`（[log.c](Application/Common/log.c)）**三者一起删**；只删一个会链接失败
-- 级别过滤在**预处理期**完成（已接进 [CMakeLists.txt](CMakeLists.txt) 的 Release 分支）。Release 加 `-DLOG_LEVEL=LOG_LEVEL_WARN`，低级别语句整条编掉，连格式串都不进 Flash
-  - ⚠️ 是 `LOG_LEVEL_WARN`（宏），**不是** `LOG_LVL_WARN`（enum 常量）。`#if` 在预处理期求值，enum 常量那时不存在，会被替换成 0 —— 写成 enum 名会让**全部日志消失**（有 `#warning` 兜底）
-- 前缀格式：`[   13180] W DISP: message`（时间戳 / 级别 / 标签）。启动阶段时间戳来自 DWT 周期计数器（`HAL_GetTick()` 在调度器启动前恒为 0）
-
-**串口归属** —— 每路串口只有一个使用者，应用层不得绕过 BSP 模块直接调 `bsp_usart`：
-
-| 串口 | 使用者 | TX 环形缓冲 |
-| --- | --- | --- |
-| USART1 | LOG 模块（日志口） | 512 B（[main.c](Application/main.c) 提供） |
-| USART2 | `bsp_rs485` | 256 B（模块内提供） |
-| USART3 | `bsp_esp8266` | 1 KB（模块内提供） |
-| USART4/5 | 空闲 | — |
-
-- **TX 环形缓冲由使用者提供**，`BSP_USART_InitEx()` 的 `tx_buf` 必填，大小须为 2 的幂
-- **返回值语义**：`BSP_USART_Write()` 返回*实际入队字节数*，部分入队是正常情况。不需要知道缓冲区多大 —— 用 `TxSpace()` 查询、余下部分续传即可
-- **`tx_cplt_callback` 的语义是「环形彻底排空」**，不是「一段发完」（DMA 分段续传时中间段完成不触发）。RS485 的 DE 方向控制依赖这一点
-
-**外设验证测试已移出构建**（`Application/Test/*.c`，源文件保留在磁盘）。主要原因是 `test_esp8266` / `test_rs485` / `test_dma_echo` 把 USART1 当原始透传口用（改波特率、重新初始化），与"USART1 = 日志口"直接冲突；它们也全都依赖 printf。需要时改造成 LOG 输出、并挪到空闲的 USART4/5，再取消 [CMakeLists.txt](Application/CMakeLists.txt) 中的注释。
-
-注：这些测试本来就已被 `--gc-sections` 丢弃（`task_init.c` 里 test 任务早已屏蔽），所以移出构建对 Flash 占用没有影响。
+完整规范（printf 定位、`%f` 链接耦合、TX 环形缓冲语义、外设测试模块状态、输出格式）见
+[conventions.md](Document/conventions.md#日志与串口规范)。
 
 ### Git Commit
 
-格式: `@ type: 简述 — 补充说明`。type: `feat`/`fix`/`chore`/`refactor`/`docs`。中文叙述, 模块/API 名保留原文。
+格式 `type(scope): 简述`。type: `feat`/`fix`/`chore`/`refactor`/`docs`。中文叙述，模块/API 名保留原文。
+
+**message 必须精简（3~10 行正文）**：只写为了什么、干了什么、用了什么架构。不写排查过程与长篇"为什么"。
+第三方库 vendor 单独成提交。详见 [conventions.md](Document/conventions.md#git-commit-convention)。
 
 ### 添加新模块
 
 - **BSP**: `.h`→`BSP/Inc/`, `.c`→`BSP/Src/`, 源文件→`BSP/CMakeLists.txt`
+- **Services**: 放 `Services/<log|bus|devices>/`（头文件与源文件同目录），源文件→`Services/CMakeLists.txt`
 - **Test**: `.c`→`Application/Test/`, 声明→`test.h`, 源文件→`Application/CMakeLists.txt`
 - **HAL**: (1) `hal_conf.h` 添加 `#define HAL_xxx_MODULE_ENABLED` + (2) `cmake/stm32cubemx/CMakeLists.txt` 取消注释源文件
 
@@ -84,12 +83,12 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 
 ## Available Skills
 
-| 技能              | 用途                                                  |
-| ----------------- | ----------------------------------------------------- |
+| 技能              | 用途                                                                         |
+| ----------------- | ---------------------------------------------------------------------------- |
 | `/build-stm32`  | CMake + Ninja 编译 (Debug 默认 / Release / 增量 / 首次 / 完全重建 / 生成HEX) |
-| `/flash-stm32`  | PyOCD 烧录固件 (`release` = 烧 Release 版, `safe` = 完整预检) |
-| `/reset-stm32`  | 硬件复位 + 串口启动日志捕获 (端口自动识别 CH340, 不写死 COM 号) |
-| `/serial-debug` | 实时串口日志监控窗口 (Git Bash tail -f)               |
+| `/flash-stm32`  | PyOCD 烧录固件 (`release` = 烧 Release 版, `safe` = 完整预检)            |
+| `/reset-stm32`  | 硬件复位 + 串口启动日志捕获 (端口自动识别 CH340, 不写死 COM 号)              |
+| `/serial-debug` | 实时串口日志监控窗口 (Git Bash tail -f)                                      |
 
 > 完整 API 参考见 [Document/skills-reference.md](Document/skills-reference.md)
 
@@ -99,15 +98,15 @@ Application 代码 **禁止** 直接 `#include` HAL 外设头文件。通过 `te
 
 `main()` 初始化 BSP 驱动 → `LOG_Init()` 启动日志 → 初始化外部 SRAM → 启动 FreeRTOS 调度器。
 
-当前跑两个任务：`vLedTask`（心跳）与 `vDispTask`（LVGL 显示 + 触摸校准）。外设验证测试已移出构建，见下方"日志与串口"。
+当前跑三个任务：`vLedTask`（心跳）、`vDispTask`（LVGL 显示 + 触摸校准）、`vNetTask`（网络任务，持有 W5500 的**全生命周期** —— 上电、配网、socket 层）。
 
 ---
 
 ## Reference Documents
 
-| 文档                                               | 内容                                                                                                                     |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 文档                                                 | 内容                                                                                                                     |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | [project-reference.md](Document/project-reference.md) | 架构图、Key Files 清单、Pin Map、Clock Tree、HAL 模块表、Memory Layout、Build Flags、目录规划、Firmware Size、Debug 配置 |
-| [conventions.md](Document/conventions.md)             | 完整编码规范 (宏/API/分层/初始化/Git)                                                                                    |
+| [conventions.md](Document/conventions.md)             | 完整编码规范 (分层/宏/API/日志与串口/Git 提交/初始化)                                                                    |
 | [skills-reference.md](Document/skills-reference.md)   | 技能详细 API 参考                                                                                                        |
-| [issue-log.md](Document/issue-log.md)                 | 疑难问题记录 —— 已定位根因的问题: 现象/根因/修复/排查方法教训 (含"已排除"清单, 避免重走)                                    |
+| [issue-log.md](Document/issue-log.md)                 | 疑难问题记录 —— 已定位根因的问题: 现象/根因/修复/排查方法教训 (含"已排除"清单, 避免重走)                               |

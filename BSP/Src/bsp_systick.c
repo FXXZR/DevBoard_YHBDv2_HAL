@@ -126,3 +126,35 @@ void BSP_SYSTICK_DelayMS(uint32_t ms)
         BSP_SYSTICK_DelayUS(1000);
     }
 }
+
+/* ----------------------------------------------------------------
+ * 微秒时间戳 — HAL_GetTick() 整毫秒 + SysTick->VAL 余数
+ *
+ * 与 DelayUS 的区别: 这个【读一次就走】, 用来量耗时 (两次调用相减),
+ * 不是用来等。
+ *
+ * 为什么不能用 HAL_GetTick 直接量: 1ms 分辨率量不出亚毫秒的 SPI 事务
+ * (2KB @18MHz 只有 0.9ms, 量化误差比被测对象还大)。
+ *
+ * 竞态: 读完 tick 再读 VAL 之间, SysTick 可能正好进位 —— 那会算出
+ * "毫秒部分已进位、余数还是上一毫秒" 的错值 (差 1ms)。所以读完 VAL
+ * 再读一次 tick, 两次相同才认。
+ *
+ * 回绕: 返回值约 71.6 分钟回绕一次。两次读数【相减】仍然正确
+ * (无符号减法), 前提是间隔远小于 71 分钟。
+ * ---------------------------------------------------------------- */
+
+uint32_t BSP_SYSTICK_GetUs(void)
+{
+    uint32_t ms_before, ms_after, val;
+    uint32_t ticks_per_us = SystemCoreClock / 1000000U;
+
+    do {
+        ms_before = HAL_GetTick();
+        val       = SysTick->VAL;           /* 递减计数器: 越大越早 */
+        ms_after  = HAL_GetTick();
+    } while (ms_before != ms_after);
+
+    /* 计数从 LOAD 递减到 0, 已走过的周期数 = LOAD - VAL */
+    return ms_before * 1000U + (SysTick->LOAD - val) / ticks_per_us;
+}

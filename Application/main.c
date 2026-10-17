@@ -51,8 +51,9 @@ int main(void) {
     HAL_Init();                    /* NVIC 分组, 不碰 SysTick */
     BSP_SYSTICK_DelayInit();       /* 时钟 PLL 72MHz, SysTick 计数器启动/中断关闭 */
 
-    /* ---- BSP 外设驱动初始化 ---- */
+    /* ---- BSP 外设驱动初始化，main中只放有必要提前初始化的BSP初始化 ---- */
     BSP_LED_Init();
+    BSP_LED_On(BSP_LED_B);  // 蓝灯亮着表示系统还没启动完, 之后会灭掉
 
     /* USART1 = 日志口: 环形缓冲 + DMA 发送, 入队即返回, 全程非阻塞
      * (printf 与 LOG 共用这一个环形缓冲, 不再互相抢 gState 丢数据) */
@@ -67,23 +68,17 @@ int main(void) {
     };
     BSP_USART_InitEx(BSP_USART1, &log_uart_cfg);
     LOG_Init(BSP_USART1);
-
-    /* 外部 SRAM 初始化 — 必须在进入 RTOS 前完成
-     * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪 */
-    BSP_SRAM_Init();
-    LOG_I("external SRAM ready (LVGL mem pool)");
-
     /* ---- 启动 Banner ----
      * 调度器尚未启动, HAL_GetTick() 恒为 0, 所以这几行时间戳都是 0 */
     LOG_I("========== HAL_TEST_Board / STM32F103ZET6 ==========");
     LOG_I("sysclk 72MHz, log on USART1 @115200 (ring buffer + DMA)");
     LOG_D("如果你看到这行, 说明 DEBUG 级别已启用");
+    /* 外部 SRAM 初始化 — 必须在进入 RTOS 前完成
+     * LVGL 内存池 (LV_MEM_POOL_ALLOC) 位于外部 SRAM, 需先就绪 */
+    BSP_SRAM_Init();
+    LOG_I("external SRAM ready (LVGL mem pool)");
 
-    /* ---- 启动前心跳: RGB 三色依次亮灭 ---- */
-    BSP_LED_On(BSP_LED_R);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_R);
-    BSP_LED_On(BSP_LED_G);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_G);
-    BSP_LED_On(BSP_LED_B);   BSP_SYSTICK_DelayMS(200);  BSP_LED_Off(BSP_LED_B);
-
+    BSP_LED_Off(BSP_LED_B); // 蓝灯灭掉表示系统启动完毕, 之后由任务自己控制
     /* ================================================================
      * FreeRTOS 启动
      * ================================================================ */

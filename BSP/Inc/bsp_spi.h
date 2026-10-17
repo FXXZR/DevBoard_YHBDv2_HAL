@@ -74,6 +74,12 @@ void BSP_SPI_Init(BSP_SPI_Bus_Id_t id, BSP_SPI_BaudPrescaler_t prescaler);
  */
 uint8_t BSP_SPI_Transfer(BSP_SPI_Bus_Id_t id, uint8_t data, uint32_t timeout);
 
+/** @brief 多字节传输结果 */
+typedef enum {
+    BSP_SPI_OK = 0,
+    BSP_SPI_ERR_TIMEOUT,    /**< 超时 —— 缓冲区内容不可信, 调用方不要当数据用 */
+} BSP_SPI_Status_t;
+
 /**
  * @brief  SPI 多字节全双工传输 (等长收发)
  * @param  id      总线编号
@@ -81,13 +87,19 @@ uint8_t BSP_SPI_Transfer(BSP_SPI_Bus_Id_t id, uint8_t data, uint32_t timeout);
  * @param  rx      接收缓冲区 (可与 tx 相同地址，实现原地传输)
  * @param  len     传输字节数
  * @param  timeout 超时 (ms)
+ * @return BSP_SPI_OK / BSP_SPI_ERR_TIMEOUT
  * @note   发送和接收同时进行：每发送一个字节便接收一个字节。
  *         若只关心接收，tx 可填 Dummy (0xFF)。
  *         若只关心发送，rx 可传 NULL 丢弃接收数据。
+ *
+ *         ★ 超时必须【查返回值】。多字节传输是整块一次 HAL 调用, 超时时
+ *         已经传出去的部分收不回来、rx 里是半截数据 —— 静默继续用就是
+ *         拿半个帧去解析。单字节版本没法这么报 (返回值就是数据本身),
+ *         所以这里特意留了状态码。
  */
-void BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
-                            const uint8_t *tx, uint8_t *rx, uint16_t len,
-                            uint32_t timeout);
+BSP_SPI_Status_t BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
+                                        const uint8_t *tx, uint8_t *rx, uint16_t len,
+                                        uint32_t timeout);
 
 #ifdef __cplusplus
 }

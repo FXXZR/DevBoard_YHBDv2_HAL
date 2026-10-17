@@ -5,13 +5,15 @@
 #   <Middleware>/
 #     ├── CMakeLists.txt   # 独立库目标
 #     ├── Source/ 或 Include/ + Source/  # 第三方源码 (只读)
-#     ├── port/            # 移植胶水
 #     └── config/          # 项目定制配置
+#
+# 本层只有第三方源码与配置, 不含移植层 —— 移植层调 BSP, 放在
+# Services/devices/ (否则 Middleware 要反向依赖 BSP)。
 #
 # 新增中间件: 新建目录 → 编写 CMakeLists.txt → 在此 add_subdirectory
 # ================================================================
 
-# ---- FatFs (R0.15a) + SD Card 移植 ----
+# ---- FatFs (R0.15a) ----
 add_subdirectory(FatFs)
 
 # ---- FreeRTOS (V11.3.0) ----
@@ -20,9 +22,12 @@ add_subdirectory(FreeRTOS)
 # ---- LVGL (v8.3.11) ----
 add_subdirectory(lvgl-8.3.11)
 
+# ---- ioLibrary_Driver (WIZnet, W5500 硬件 TCP/IP 协议栈) ----
+add_subdirectory(ioLibrary)
+
 # ---- middleware 聚合目标 (STATIC) ----
-# 汇集 fatfs/freertos OBJECT 库的 .o 文件, 打包为 libmiddleware.a
+# 汇集各 OBJECT 库的 .o 文件, 打包为 libmiddleware.a
 # STATIC 确保 OBJECT 的 .o 被正确传播到最终可执行文件
 # (INTERFACE 库无法可靠传递 OBJECT 库的目标文件)
 add_library(middleware STATIC)
-target_link_libraries(middleware PUBLIC fatfs freertos lvgl)
+target_link_libraries(middleware PUBLIC fatfs freertos lvgl iolibrary)

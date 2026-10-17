@@ -1,6 +1,8 @@
 /**
  * @file lvgl_port.h
  * @brief LVGL 板级移植层 — 显示 (ILI9341) + 触摸 (XPT2046) 统一挂接
+ * @note  归 Services/devices/ 而非 Middleware/lvgl —— 它调 BSP, 放 Middleware
+ *        会让 Middleware 反向依赖 BSP。
  */
 #ifndef LVGL_PORT_H
 #define LVGL_PORT_H

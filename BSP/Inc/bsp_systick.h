@@ -53,6 +53,19 @@ void BSP_SYSTICK_DelayUS(uint32_t us);
  */
 void BSP_SYSTICK_DelayMS(uint32_t ms);
 
+/**
+ * @brief  读当前微秒时间戳 (用于测耗时, 不是延时)
+ * @return 自复位起经过的微秒数, 约 71.6 分钟回绕一次
+ * @note   两次调用【相减】得到间隔, 无符号减法在回绕处仍然正确。
+ *
+ *         量耗时必须用它而不是 HAL_GetTick(): 1ms 分辨率量不出亚毫秒的
+ *         SPI 事务 (2KB @18MHz 只有 0.9ms)。
+ *
+ *         调度器启动前 HAL_GetTick() 恒为 0, 此时只有 SysTick 的毫秒内
+ *         余数有效 —— 启动自检阶段的耗时测量不可用它。
+ */
+uint32_t BSP_SYSTICK_GetUs(void);
+
 #ifdef __cplusplus
 }
 #endif

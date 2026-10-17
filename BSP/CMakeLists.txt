@@ -17,6 +17,7 @@ add_library(bsp OBJECT)
 # BSP 源文件列表
 target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_assert.c     # panic 通道 (基础设施, 无依赖)
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_exti.c       # 共享 EXTI 向量的分发点
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_systick.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_led.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_usart.c
@@ -31,6 +32,7 @@ target_sources(bsp PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_ap3216c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_spi_flash.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_w5500_hw.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_sdcard.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_rs485.c
     ${CMAKE_CURRENT_SOURCE_DIR}/Src/bsp_esp8266.c

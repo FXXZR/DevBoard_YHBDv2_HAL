@@ -404,19 +404,14 @@ uint8_t BSP_XPT2046_IsPressed(void)
     return (HAL_GPIO_ReadPin(xpt_hw.irq_port, xpt_hw.irq_pin) == GPIO_PIN_RESET) ? 1 : 0;
 }
 
-void BSP_XPT2046_EXTI_Callback(void)
-{
-    if (__HAL_GPIO_EXTI_GET_IT(xpt_hw.irq_pin) != 0x00u) {
-        __HAL_GPIO_EXTI_CLEAR_IT(xpt_hw.irq_pin);
-        BSP_XPT2046_TouchFlag = 1;
-    }
-}
-
 /* ================================================================
- * ISR: EXTI9_5 中断 (覆盖 startup 中的弱定义)
+ * ISR: 触摸这一条 EXTI 线 (PF9)
+ *
+ * 向量名 (EXTI9_5_IRQHandler) 不在这里 —— 同一段里还挂着 W5500 的 PG8,
+ * 向量由 bsp_exti.c 统一收下再分发到本函数。
  * ================================================================ */
 
-void EXTI9_5_IRQHandler(void)
+void BSP_XPT2046_ExtiHandler(void)
 {
     if (__HAL_GPIO_EXTI_GET_IT(xpt_hw.irq_pin) != 0x00u) {
         __HAL_GPIO_EXTI_CLEAR_IT(xpt_hw.irq_pin);

@@ -100,6 +100,12 @@ def main():
         text = bytes(output).decode("utf-8", errors="replace")
         if text:
             log(f"capture RX {len(output)}B\n{text}")
+
+            # ⚠️ Windows 控制台默认 GBK, 而串口日志里既有中文、也可能有解码
+            # 失败的替换字符 (U+FFFD) —— GBK 编不出后者。直接 write 会抛
+            # UnicodeEncodeError, 把【已经抓到的整段日志】连同退出码一起丢掉,
+            # 现象是"什么都没输出", 极易误判成板子没跑。
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
             sys.stdout.write(text)
             sys.stdout.flush()
         else:
