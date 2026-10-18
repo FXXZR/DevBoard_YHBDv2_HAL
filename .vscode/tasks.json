@@ -1,0 +1,151 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        // ============================================================================
+        // 0. CMake Build (compile only, no flash)
+        // ============================================================================
+        {
+            "label": "BUILD",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/build/Debug"
+            ],
+            "group": "build",
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": ["relative", "${workspaceFolder}"],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            },
+            "detail": "CMake Ninja Build (Debug, -O0 -g3)"
+        },
+
+        // ============================================================================
+        // 1a. ELF → HEX
+        // ============================================================================
+        {
+            "label": "GET HEX",
+            "type": "shell",
+            "command": "arm-none-eabi-objcopy",
+            "args": [
+                "-O", "ihex",
+                "${workspaceFolder}/build/Debug/HAL_TEST_Board.elf",
+                "${workspaceFolder}/build/Debug/HAL_TEST_Board.hex"
+            ],
+            "group": "none",
+            "problemMatcher": [],
+            "detail": "ELF → Intel Hex"
+        },
+
+        // ============================================================================
+        // 1b. ELF → BIN
+        // ============================================================================
+        {
+            "label": "GET BIN",
+            "type": "shell",
+            "command": "arm-none-eabi-objcopy",
+            "args": [
+                "-O", "binary",
+                "${workspaceFolder}/build/Debug/HAL_TEST_Board.elf",
+                "${workspaceFolder}/build/Debug/HAL_TEST_Board.bin"
+            ],
+            "group": "none",
+            "problemMatcher": [],
+            "detail": "ELF → Raw Binary"
+        },
+
+        // ============================================================================
+        // 1. ELF → HEX & BIN（并行执行 GET HEX + GET BIN）
+        // ============================================================================
+        {
+            "label": "GET HEX & BIN",
+            "type": "shell",
+            "command": "echo 'HEX & BIN done.'",
+            "group": "none",
+            "problemMatcher": [],
+            "detail": "一键同时生成 HEX 和 BIN",
+            "dependsOn": ["GET HEX", "GET BIN"],
+            "dependsOrder": "parallel"
+        },
+
+        // ============================================================================
+        // 2. PYOCD Flash → 先 BUILD 再烧录 (F5 调试一键自动完成)
+        //    注意: 任务名 "PYOCD Flash" 被 .vscode/launch.json 的 preLaunchTask 引用,
+        //          改名会打断 F5 调试流程。
+        // ============================================================================
+        {
+            "label": "PYOCD Flash",
+            "type": "shell",
+            "command": "pyocd",
+            "args": [
+                "flash",
+                "--target", "stm32f103ze",
+                "--connect", "under-reset",
+                "-O", "reset_type=hw",
+                "${workspaceFolder}/build/Debug/HAL_TEST_Board.elf"
+            ],
+            "group": "none",
+            "problemMatcher": [],
+            "detail": "先编译再烧录 Debug (PyOCD)",
+            "dependsOn": ["BUILD"]
+        },
+
+        // ============================================================================
+        // 3. Release 构建 —— 与 Debug 完全独立的 build 目录
+        //    级别差异 (见根 CMakeLists.txt):
+        //      Debug   : -O0 -g3, 全量日志, panic 停机等调试器, 链接 %f 浮点 (约 11KB)
+        //      Release : -Os -g0, 日志只留 WARN+, panic 复位自恢复
+        //    体积参考: Debug ~299KB / Release ~153KB (FLASH)
+        // ============================================================================
+        {
+            "label": "BUILD (Release)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "--build", "${workspaceFolder}/build/Release"
+            ],
+            "group": "build",
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": ["relative", "${workspaceFolder}"],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            },
+            "detail": "CMake Ninja Build (Release, -Os -g0)。首次使用需先 configure，见技能 /build-stm32"
+        },
+
+        // ============================================================================
+        // 4. PYOCD Flash (Release) → 先 BUILD (Release) 再烧录
+        //    用于验证发布固件 / 测体积与性能。日常调试请用上面的 Debug 版。
+        // ============================================================================
+        {
+            "label": "PYOCD Flash (Release)",
+            "type": "shell",
+            "command": "pyocd",
+            "args": [
+                "flash",
+                "--target", "stm32f103ze",
+                "--connect", "under-reset",
+                "-O", "reset_type=hw",
+                "${workspaceFolder}/build/Release/HAL_TEST_Board.elf"
+            ],
+            "group": "none",
+            "problemMatcher": [],
+            "detail": "先编译再烧录 Release (PyOCD)",
+            "dependsOn": ["BUILD (Release)"]
+        }
+    ]
+}

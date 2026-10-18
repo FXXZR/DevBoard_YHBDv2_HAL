@@ -53,7 +53,7 @@ else()
 endif()
 
 # 缩短 __FILE__ 与调试信息里的绝对路径 (断言和日志都会用到 __FILE__)
-#   D:/_Study_Cur/.../BSP/Src/bsp_spi.c   →   BSP/Src/bsp_spi.c
+#   ${CMAKE_SOURCE_DIR}/BSP/Src/bsp_spi.c   →   BSP/Src/bsp_spi.c
 # 每个断言点省约 50 字节; GCC 8+ / AC6 (armclang) 支持, AC5 不支持.
 add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}/=)
 

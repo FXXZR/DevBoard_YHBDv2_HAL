@@ -164,7 +164,7 @@ Flash latency = 2WS. SysTick = 1ms via `HAL_IncTick()`.
 ## Known Hardware Quirks (硬件坑, 改动前必读)
 
 > 本节只记**硬件本身的性质**。已定位根因的历史故障不在此展开 —— 见
-> [issue-log.md](issue-log.md)（含"已排除"清单与排查方法教训，动手前值得先翻一眼）。
+> 本地疑难问题记录（不入库；含"已排除"清单与排查方法教训，动手前值得先翻一眼）。
 
 ### 屏幕实际控制器是 ST7789V
 
@@ -176,7 +176,7 @@ Flash latency = 2WS. SysTick = 1ms via `HAL_IncTick()`.
 
 `bsp_lcd_ili9341.c` 的 `lcd_delay()` **不能用空转 NOP 循环实现** —— 其耗时会随
 代码在 Flash 中的地址漂移而改变，导致面板复位时序不稳定。详见
-[issue-log.md 001](issue-log.md)。
+本地疑难问题记录 001（不入库）。
 
 ### FSMC 时序参数下溢
 
@@ -315,7 +315,7 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 | 2KB SPI 读 burst | **7.6 ms** | 空载；写 burst 2.7 ms。线速只要 0.91 ms |
 | 2KB SPI 读 burst（被抢 CPU） | **16.4 ms** | 同优先级任务忙等时，正好 2 倍 |
 | 收发 2KB 往返 | ~5 ms | TCP，Debug `-O0` |
-| TCP 握手 | 2~4 ms | 链路稳定后；刚上电可能撞对端地址探测，见 issue-log 005 |
+| TCP 握手 | 2~4 ms | 链路稳定后；刚上电可能撞对端地址探测，见本地疑难问题记录 005 |
 | ICMP 往返 | 1.19 ms | PC 侧抓包测得 |
 | UDP 全速收包 | **~2000 包/秒** | 上限由 SPI 吞吐决定，非调度 |
 | DHCP DORA 全程 | **686 ms** | DISCOVER→OFFER 30 ms（含 20 ms 轮询粒度） |
@@ -330,7 +330,7 @@ Linker discards unused libc/libm/libgcc sections (`--gc-sections`). Uses `--spec
 
 > `W5500_SPI_TIMEOUT_MS` 取 50 ms 就是照第一行定的（最坏值 16.4 ms 的 3 倍余量）。
 > 这些数字都是 `-O0` 的 Debug 构建 —— 瓶颈是 HAL 逐字节轮询循环的 CPU 开销，
-> 不是线速。根因见 [issue-log.md 003](issue-log.md)。
+> 不是线速。根因见本地疑难问题记录 003（不入库）。
 
 ## Debug
 

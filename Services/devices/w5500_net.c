@@ -558,14 +558,14 @@ void W5500_Sock_Close(uint8_t sn)
         s_wait_cmd_done(sn);
 
         /* ★ 自己带期限等, 等不到就【强制关闭】: 不能直接调 close(), 它内部是
-         *   无超时忙等, 对端不可达时网络任务整个卡死 (见 issue-log 006)。 */
+         *   无超时忙等, 对端不可达时网络任务整个卡死 (见本地疑难问题记录 006)。 */
         if (s_wait_closed(sn, W5500_CLOSE_TIMEOUT_MS)) {
             close(sn);
             return;
         }
 
         /* ★★ 重读一次状态再决定 —— 这两秒里芯片可能【自己】把连接建起来了
-         *    (对端的 SYN-ACK 只是来晚了), 见 issue-log 007。 */
+         *    (对端的 SYN-ACK 只是来晚了), 见本地疑难问题记录 007。 */
         sr = getSn_SR(sn);
         if (s_is_connected_state(sr)) {
             LOG_W("sn%d 超时放弃时芯片已进 %s, 先发 FIN 通知对端", sn, s_state_str(sr));

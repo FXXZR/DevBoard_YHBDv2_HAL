@@ -5,14 +5,14 @@ LVGL 显示，以及 **W5500 硬件 TCP/IP** 网络通路。**全开源工具链
 + ARM GCC + Clangd + PyOCD + Cortex-Debug）。
 
 > **目标板**: 野火霸道 V2 (YHBDv2) | **调试器**: DAP-LINK (CMSIS-DAP / SWD)
-> 项目参考: [Document/project-reference.md](Document/project-reference.md) · 编码规范: [Document/conventions.md](Document/conventions.md) · 疑难问题: [Document/issue-log.md](Document/issue-log.md)
+> 项目参考: [Document/project-reference.md](Document/project-reference.md) · 编码规范: [Document/conventions.md](Document/conventions.md) · 疑难问题: 本地维护（不入库）
 
 ---
 
 ## 特性
 
 - **分层架构**：`Application → Services → { Middleware, BSP } → Drivers`，依赖只允许向下；
-  第三方库原样放在 `Middleware/`，移植层归 `Services/devices/`
+  第三方库源码放在 `Middleware/`（保持上游源码，构建脚本与配置按项目调整），移植层归 `Services/devices/`
 - **W5500 网络**：SPI2 驱动 + ioLibrary_Driver；TCP 客户端/服务端、UDP、INT 中断驱动收包；
   socket 封装全部带超时（ioLibrary 原生的 `send`/`recv`/`close` 是无界自旋）
 - **DHCP / DNS**：在 W2 中完成 DORA 与公网域名解析实测（测试脚手架已清理，结论见文档）
@@ -77,10 +77,13 @@ Drivers/                ST HAL + CMSIS
 ### 安装
 
 ```bash
-pip install cmake ninja pyocd
+pip install cmake ninja pyocd pyserial
 code --install-extension llvm-vs-code-extensions.vscode-clangd
 code --install-extension marus25.cortex-debug
 ```
+
+Claude Code 用户首次 clone 后运行 `python tools/sync_skills.py`，把 `.agents/skills/` 链接到
+`.claude/skills/`（Windows junction / Unix symlink）；`.claude/skills/` 不入库。
 
 ARM GCC 从 [ARM Developer](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)
 下载，确保 `arm-none-eabi-gcc` 在 PATH 中。
@@ -131,7 +134,7 @@ VS Code 按 F5 → **Flash & Debug**，自动停在 `main()`。
 | --- | --- |
 | [project-reference.md](Document/project-reference.md) | 架构、引脚、时钟、HAL 模块、内存布局、W5500 实测数据 |
 | [conventions.md](Document/conventions.md) | 分层、宏、API、日志、Git 提交规范 |
-| [issue-log.md](Document/issue-log.md) | 已定位根因的疑难问题与排查教训 |
+| 疑难问题记录 | 已定位根因的疑难问题与排查教训（本地维护，不入库） |
 | [skills-reference.md](Document/skills-reference.md) | Claude Code 技能参考 |
 
 ---

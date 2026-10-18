@@ -5,13 +5,20 @@ build/
 *.hex
 *.bin
 
-# Editor / IDE config (personal settings)
-.vscode/
+# Editor / IDE config
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 .claude/
+.agents/*
+!.agents/skills/
 .idea/
 
 # Reference/temp files (not part of firmware)
 Document/temp/
+
+# Local-only troubleshooting notes
+Document/issue-log.md
 
 # Python bytecode cache (tools/ 下的辅助脚本, 属于编译产物不入库)
 __pycache__/

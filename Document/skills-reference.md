@@ -1,6 +1,6 @@
 # Skills Reference — HAL_TEST_Board 项目技能 API
 
-> Claude Code 技能详细参考。技能实现代码在 `.claude/skills/` 目录下。
+> Claude Code 技能详细参考。技能唯一源在 `.agents/skills/`；Claude Code 通过 `python tools/sync_skills.py` 生成的 `.claude/skills/` 使用。
 
 ## 快速索引
 
@@ -92,7 +92,7 @@ pyocd flash --target stm32f103ze --connect under-reset \
 
 ## `/reset-stm32` — 硬件复位
 
-**描述**: 通过 PyOCD 硬件复位 STM32F103ZET6，可选择捕获 USART1 启动日志 (COM6, 115200)。
+**描述**: 通过 PyOCD 硬件复位 STM32F103ZET6，可选择捕获 USART1 启动日志 (自动识别 CH340, 115200)。
 
 **快速复位 (不捕获日志)**:
 ```bash
@@ -101,7 +101,8 @@ pyocd reset -t stm32f103ze -m hw -M attach 2>&1
 
 **复位 + 捕获启动 Banner**:
 ```bash
-python tools/capture_boot.py --port COM6 --baud 115200 --wait 4.0 2>&1
+# 默认自动识别 CH340；需要指定时加 --port COMx
+python tools/capture_boot.py --baud 115200 --wait 4.0 2>&1
 ```
 
 **通用串口收发**:
@@ -112,8 +113,8 @@ python tools/serial_cli.py --send "hello\r\n" --read 1.0
 # 仅读取 N 秒
 python tools/serial_cli.py --read 3.0
 
-# 自定义端口/波特率
-python tools/serial_cli.py --port COM6 --baud 9600 --send "AT\r\n" --read 2.0
+# 自定义波特率（端口自动识别；需要时加 --port COMx）
+python tools/serial_cli.py --baud 9600 --send "AT\r\n" --read 2.0
 ```
 
 **注意事项**:
