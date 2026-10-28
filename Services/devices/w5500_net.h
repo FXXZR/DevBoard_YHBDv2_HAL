@@ -243,7 +243,7 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
  * @brief  关闭 socket: 已连接先发 FIN, 再带期限等它回到 CLOSED
  * @note   等不到就发 CLOSE 命令强制关闭 —— Sn_CR_CLOSE 是"立即关", 不等
  *         对端回应。所以本函数【有界】: 对端不可达(拔网线)时最多阻塞
- *         W5500_CLOSE_TIMEOUT_MS 而不是无限期。
+ *         关连接期限 (当前 2000ms, 见 w5500_net.c 的 kCloseTimeout), 而不是无限期。
  *
  *         这一条是实测逼出来的: ioLibrary 的 close()/disconnect() 里都是
  *         无超时等待, 对端消失时网络任务会整个卡在关连接上 (日志直接停住)。

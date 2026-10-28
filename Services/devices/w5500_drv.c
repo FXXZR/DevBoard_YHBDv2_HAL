@@ -24,11 +24,20 @@
 
 /* socket 收发缓冲分配 —— 8 个 socket 各 2KB, 正好用完 W5500 的
  * 16KB TX + 16KB RX。(如果将来要某个 socket 传大包, 从别的 socket 挪。) */
-static const uint8_t kSocketTxSize[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
-static const uint8_t kSocketRxSize[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+static const uint8_t socket_tx_size[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+static const uint8_t socket_rx_size[8] = { 2, 2, 2, 2, 2, 2, 2, 2 };
+
+/* VERSIONR 的期望值 —— W5500 固定返回 0x04 */
+static const uint8_t version_expected = 0x04U;
+
+/* PHYCFGR 的 RST 位 (bit7)。
+ * ioLibrary 只给了 AND 掩码 PHYCFGR_RST = ~(1<<7) (用于"复位 PHY"),
+ * 没给置位用的值, 所以这里补一个。实测 0xFA / 0xFF 都印证了 bit7=1
+ * 是"PHY 正常工作"。 */
+static const uint8_t phy_cfgr_rst_set = 0x80U;
 
 /* 复位后 PHY 配置寄存器稳定所需的时间 (经验值, 不是自协商完成时间) */
-#define W5500_PHY_REG_SETTLE_MS     10
+static const uint32_t phy_reg_settle_ms = 10U;
 
 /* ================================================================
  * 内部
@@ -55,7 +64,7 @@ static void w5500_phy_config(void)
 
     /* ① 置 OPMD=1 (改用寄存器配置) + OPMDC=111 (全能力/自协商), RST 保持 1 */
     v  = WIZCHIP_READ(PHYCFGR);
-    v |= (uint8_t)(PHYCFGR_OPMD | PHYCFGR_OPMDC_ALLA | W5500_PHYCFGR_RST_SET);
+    v |= (uint8_t)(PHYCFGR_OPMD | PHYCFGR_OPMDC_ALLA | phy_cfgr_rst_set);
     WIZCHIP_WRITE(PHYCFGR, v);
     BSP_SYSTICK_DelayMS(1);
 
@@ -68,9 +77,9 @@ static void w5500_phy_config(void)
 
     /* ③ RST=1: 释放, PHY 开始自协商 */
     v  = WIZCHIP_READ(PHYCFGR);
-    v |= (uint8_t)W5500_PHYCFGR_RST_SET;
+    v |= phy_cfgr_rst_set;
     WIZCHIP_WRITE(PHYCFGR, v);
-    BSP_SYSTICK_DelayMS(W5500_PHY_REG_SETTLE_MS);
+    BSP_SYSTICK_DelayMS(phy_reg_settle_ms);
 }
 
 /* ================================================================
@@ -92,7 +101,7 @@ W5500_Status_t W5500_Drv_Init(void)
 
     /* ④ 读版本寄存器校验通路 —— 这一步本身就是通路测试, 不需要示波器 */
     ver = W5500_Drv_ReadVersion();
-    if (ver != W5500_VERSION_EXPECTED) {
+    if (ver != version_expected) {
         /* 全 0 / 全 1 说明 MISO 恒定, SPI 根本没有从机在应答,
          * 方向是查接线/供电/片选, 而不是查芯片型号。 */
         W5500_Status_t st = (ver == 0x00 || ver == 0xFF) ? W5500_ERR_SPI
@@ -103,7 +112,7 @@ W5500_Status_t W5500_Drv_Init(void)
 
     /* ⑤ 分配 socket 收发缓冲。⚠️ 内部含一次软件复位, 会把 PHYCFGR 打回
      *    默认值 —— 所以必须在 ⑥ 之前做, 顺序反了 PHY 配置会被悄悄抹掉。 */
-    if (wizchip_init((uint8_t *)kSocketTxSize, (uint8_t *)kSocketRxSize) != 0) {
+    if (wizchip_init((uint8_t *)socket_tx_size, (uint8_t *)socket_rx_size) != 0) {
         LOG_E("init 失败: %s", W5500_Drv_StatusStr(W5500_ERR_MEMCFG));
         return W5500_ERR_MEMCFG;
     }

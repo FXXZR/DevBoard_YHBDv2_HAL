@@ -22,25 +22,34 @@
 #define RTC_BKP_YEAR    RTC_BKP_DR2   /* Year  0~99      */
 #define RTC_BKP_MONTH   RTC_BKP_DR3   /* Month 1~12      */
 #define RTC_BKP_DATE    RTC_BKP_DR4   /* Date  1~31      */
-#define RTC_MAGIC_VALUE 0xA5A5U
 
-/* 默认值 (冷启动时写入) */
-#define RTC_DEFAULT_YEAR    20U    /* 2020 */
-#define RTC_DEFAULT_MONTH   1U
-#define RTC_DEFAULT_DATE    1U
-#define RTC_DEFAULT_HOUR    0U
-#define RTC_DEFAULT_MIN     0U
-#define RTC_DEFAULT_SEC     0U
+/* Magic 值 —— 冷/热启动判定 (BKP_DR1 的内容) */
+static const uint16_t rtc_magic_value = 0xA5A5U;
+
+/* ================================================================
+ * 默认时间 (冷启动时写入)
+ *
+ * 直接复用头文件里的 BSP_RTC_DateTime_t, 不再另造一个同构类型。
+ * weekday 不写死: 由 BSP_RTC_CalcWeekday 在初始化时按日期算出, 免得
+ * 改默认日期时还要手工同步星期。
+ * ================================================================ */
+
+static const BSP_RTC_DateTime_t rtc_default = {
+    .sec     = 0U,
+    .min     = 0U,
+    .hour    = 0U,
+    .date    = 1U,
+    .month   = 1U,
+    .year    = 20U,              /* 20 → 2020 */
+    .century = BSP_RTC_CENTURY,
+};
 
 /* ================================================================
  * 时间戳转换常量
  * ================================================================ */
-#define SEC_PER_MIN   60U
-#define SEC_PER_HOUR  3600U
-#define SEC_PER_DAY   86400U
-
-/* 1970-01-01 (Unix epoch) 到 2000-01-01 的天数 (30 年含 7 个闰年) */
-#define DAYS_1970_2000  10957U
+static const uint32_t sec_per_min  = 60U;
+static const uint32_t sec_per_hour = 3600U;
+static const uint32_t sec_per_day  = 86400U;
 
 /* ================================================================
  * 运行时上下文
@@ -125,8 +134,8 @@ uint32_t BSP_RTC_dt_to_ts(const BSP_RTC_DateTime_t *dt)
     }
     days += (uint32_t)(dt->date - 1);
 
-    return days * SEC_PER_DAY + (uint32_t)dt->hour * SEC_PER_HOUR
-           + (uint32_t)dt->min * SEC_PER_MIN + dt->sec;
+    return days * sec_per_day + (uint32_t)dt->hour * sec_per_hour
+           + (uint32_t)dt->min * sec_per_min + dt->sec;
 }
 
 /* ================================================================
@@ -212,25 +221,23 @@ static void rtc_cold_init(void)
     HAL_RTC_Init(&rtc_handle);
 
     /* ---- 3. 写入默认时间 (通过 HAL Time+Date) ---- */
-    RTC_TimeTypeDef t = { RTC_DEFAULT_HOUR, RTC_DEFAULT_MIN, RTC_DEFAULT_SEC };
+    RTC_TimeTypeDef t = { .Hours = rtc_default.hour,
+                          .Minutes = rtc_default.min,
+                          .Seconds = rtc_default.sec };
     HAL_RTC_SetTime(&rtc_handle, &t, RTC_FORMAT_BIN);
 
     /* HAL RTC_DateTypeDef: {WeekDay, Month, Date, Year} */
-    RTC_DateTypeDef d = { .WeekDay = 0, .Month = RTC_DEFAULT_MONTH,
-                          .Date = RTC_DEFAULT_DATE, .Year = RTC_DEFAULT_YEAR };
+    RTC_DateTypeDef d = { .WeekDay = 0, .Month = rtc_default.month,
+                          .Date = rtc_default.date, .Year = rtc_default.year };
     HAL_RTC_SetDate(&rtc_handle, &d, RTC_FORMAT_BIN);
 
     /* ---- 4. Backup 寄存器保存日期 ---- */
-    BSP_RTC_DateTime_t def = {
-        .weekday = BSP_RTC_CalcWeekday(RTC_DEFAULT_YEAR, RTC_DEFAULT_MONTH, RTC_DEFAULT_DATE),
-        .sec = RTC_DEFAULT_SEC, .min = RTC_DEFAULT_MIN, .hour = RTC_DEFAULT_HOUR,
-        .date = RTC_DEFAULT_DATE, .month = RTC_DEFAULT_MONTH, .year = RTC_DEFAULT_YEAR,
-        .century = BSP_RTC_CENTURY,
-    };
+    BSP_RTC_DateTime_t def = rtc_default;
+    def.weekday = BSP_RTC_CalcWeekday(def.year, def.month, def.date);
     rtc_backup_date(&def);
 
     /* ---- 5. 标记已配置 ---- */
-    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_MAGIC, RTC_MAGIC_VALUE);
+    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_MAGIC, rtc_magic_value);
 }
 
 /* ================================================================
@@ -246,7 +253,7 @@ void BSP_RTC_Init(void)
     HAL_PWR_EnableBkUpAccess();
 
     uint32_t magic = HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MAGIC);
-    if (magic != RTC_MAGIC_VALUE) {
+    if (magic != rtc_magic_value) {
         /* 冷启动: VBAT 掉电过, 完整配置 时钟源 + RTC + 默认值 + BKP */
         rtc_cold_init();
     } else {

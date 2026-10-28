@@ -58,7 +58,7 @@
  * 主要用于静态IP测试阶段，方便在应用层直接改，后续可以搭配存储持久化。
  * ================================================================ */
 
-static const wiz_NetInfo kNetCfg = {
+static const wiz_NetInfo net_cfg = {
     .mac  = { 0x02, 0x08, 0xDC, 0x01, 0x02, 0x03 },
     .ip   = { 192, 168, 1, 100 },
     .sn   = { 255, 255, 255, 0 },
@@ -77,18 +77,18 @@ static const wiz_NetInfo kNetCfg = {
  * ⚠️ 周期服务里只放"快进快出"的活。任何会阻塞数百毫秒以上的协议流程
  *    (DHCP 的 ARP 冲突检测、DNS 解析) 都要单独安排, 否则链路监控和收包
  *    会一起停掉。 */
-enum { TASK_NET_TICK_MS = 1000 };
+static const uint32_t task_net_tick_ms = 1000U;
 
 /* W5500 上电失败后的重试间隔 (每次重试内含约 100ms 复位等待) */
-enum { TASK_NET_RETRY_MS = 1000 };
+static const uint32_t task_net_retry_ms = 1000U;
 
 /* INT 线没放掉时的重看间隔 —— 见 vNetTask 里取 wait 那段的说明 */
-enum { TASK_NET_INT_RETRY_MS = 2 };
+static const uint32_t task_net_int_retry_ms = 2U;
 
 /* 一次事件处理最多来回搬几趟。收包洪水时不能把主循环饿死: 周期服务
  * (链路监控 / 以后接的业务服务) 也得有机会跑。搬不完不要紧 —— 线一直低,
  * 收尾会把等待超时改成 2ms, 马上回来接着搬。 */
-enum { TASK_NET_SOCK_ROUNDS = 8 };
+static const uint16_t task_net_sock_rounds = 8U;
 
 /* 事件位 —— 一位一个来源, 生产者写在注释里 */
 enum {
@@ -187,7 +187,7 @@ static void net_global_event(uint8_t ir)
  */
 static void net_socket_service(void)
 {
-    for (int round = 0; round < TASK_NET_SOCK_ROUNDS; round++) {
+    for (int round = 0; round < (int)task_net_sock_rounds; round++) {
         uint8_t sir = W5500_Sock_IntPending();  /* 哪些 socket 有事 (读不清) */
         uint8_t ir  = W5500_IntClear();         /* 全局的, 顺手清掉 */
 
@@ -259,10 +259,10 @@ void vNetTask(void *pvParameters)
     /* 起不来不删任务: 芯片晚供电、网线后插都还有救。失败原因由 Init 自己
      * 打进日志, 这里只负责节奏。 */
     while (W5500_Drv_Init() != W5500_OK) {
-        vTaskDelay(pdMS_TO_TICKS(TASK_NET_RETRY_MS));
+        vTaskDelay(pdMS_TO_TICKS(task_net_retry_ms));
     }
 
-    W5500_Net_Apply(&kNetCfg);
+    W5500_Net_Apply(&net_cfg);
 
     /* 同一个开关的两头, 两头都得开, 缺哪头都是静默的:
      *   W5500_Int_Enable      芯片愿意报 (IMR/SIMR 复位默认是关的!)
@@ -288,8 +288,8 @@ void vNetTask(void *pvParameters)
          *   **不会有新的下降沿**, 干等边沿等不到。线是高的时候才敢睡满一个
          *   服务周期, 那种情况一定有下降沿来叫醒我们。 */
         wait = (BSP_W5500_HW_IntLevel() == 0)
-             ? pdMS_TO_TICKS(TASK_NET_INT_RETRY_MS)
-             : pdMS_TO_TICKS(TASK_NET_TICK_MS);
+             ? pdMS_TO_TICKS(task_net_int_retry_ms)
+             : pdMS_TO_TICKS(task_net_tick_ms);
 
         (void) xTaskNotifyWait(0, ULONG_MAX, &evt, wait);
 
@@ -303,7 +303,7 @@ void vNetTask(void *pvParameters)
          * 唤醒本任务, 那时不该顺手把每个服务都跑一遍 (D5 起是 DHCP_run 这种
          * 带网络交互的)。 */
         now = xTaskGetTickCount();
-        if ((now - last_tick) >= pdMS_TO_TICKS(TASK_NET_TICK_MS)) {
+        if ((now - last_tick) >= pdMS_TO_TICKS(task_net_tick_ms)) {
             last_tick = now;
             net_tick();
         }

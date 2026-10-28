@@ -128,11 +128,9 @@ static __inline uint16_t lcd_read_data(void)
  * ================================================================ */
 
 /* 面板复位/唤醒时序 (ILI9341 手册) */
-enum {
-    LCD_RESET_LOW_MS  = 10,     /* 复位低电平 — 手册下限 10us, 取宽裕值 */
-    LCD_RESET_WAIT_MS = 120,    /* 复位释放后 */
-    LCD_SLEEP_OUT_MS  = 120,    /* Sleep Out 之后 */
-};
+static const uint32_t reset_low_ms  = 10U;    /* 复位低电平 — 手册下限 10us, 取宽裕值 */
+static const uint32_t reset_wait_ms = 120U;   /* 复位释放后 */
+static const uint32_t sleep_out_ms  = 120U;   /* Sleep Out 之后 */
 
 static __inline void lcd_delay(uint32_t delay_ms)
 {
@@ -247,9 +245,9 @@ static void lcd_init_fsmc(void)
 static void lcd_hw_reset(void)
 {
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_RESET);
-    lcd_delay(LCD_RESET_LOW_MS);
+    lcd_delay(reset_low_ms);
     HAL_GPIO_WritePin(LCD_RST_PORT, LCD_RST_PIN, GPIO_PIN_SET);
-    lcd_delay(LCD_RESET_WAIT_MS);
+    lcd_delay(reset_wait_ms);
 }
 
 /* ================================================================
@@ -354,7 +352,7 @@ static void lcd_reg_config_ili9341(void)
 
     /* Sleep Out (11h) */
     lcd_write_cmd(0x11);
-    lcd_delay(LCD_SLEEP_OUT_MS);
+    lcd_delay(sleep_out_ms);
 
     /* Display ON (29h) */
     lcd_write_cmd(0x29);
@@ -436,7 +434,7 @@ static void lcd_reg_config_st7789v(void)
     lcd_write_data(0x1C); lcd_write_data(0x1D);
 
     lcd_write_cmd(0x11);
-    lcd_delay(LCD_SLEEP_OUT_MS);
+    lcd_delay(sleep_out_ms);
 
     lcd_write_cmd(0x29);
     lcd_write_cmd(0x2C);

@@ -25,10 +25,12 @@ typedef enum {
 } BSP_KEY_Id_t;
 
 /* ================================================================
- * 按键状态宏
+ * 按键状态
  * ================================================================ */
-#define BSP_KEY_PRESSED   1U   /* 按键按下 */
-#define BSP_KEY_RELEASED  0U   /* 按键释放 */
+typedef enum {
+    BSP_KEY_RELEASED = 0,   /* 按键释放 */
+    BSP_KEY_PRESSED,        /* 按键按下 */
+} BSP_Key_State_t;
 
 /* ================================================================
  * API
@@ -47,7 +49,7 @@ void BSP_KEY_Init(void);
  * @note   按键按下后不等待释放，调用方需自行处理重复触发问题。
  *         消抖期间阻塞 ~20ms。
  */
-uint8_t BSP_KEY_Scan(BSP_KEY_Id_t key);
+BSP_Key_State_t BSP_KEY_Scan(BSP_KEY_Id_t key);
 
 #ifdef __cplusplus
 }

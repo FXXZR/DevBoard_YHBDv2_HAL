@@ -42,14 +42,14 @@
  * 不是线速。详见本地疑难问题记录（不入库）。
  *
  * 50ms = 实测最坏值的三倍余量。改这个值前先重测。 */
-#define W5500_SPI_TIMEOUT_MS        50
+static const uint32_t spi_timeout_ms = 50U;
 
 /* 等总线锁的超时. 事务都不长 (寄存器访问 4 字节; socket 缓冲最多 2KB),
  * 正常情况锁总是立即到手。给个宽裕但有限的值 —— 超时说明有任务卡住或
  * 死锁, 那种情况必须响, 不能静默继续。
  *
- * 2KB 事务的持锁时长: 18MHz 下纯线速 0.91ms, 见 W5500_SPI_TIMEOUT_MS 的说明. */
-#define W5500_LOCK_TIMEOUT_MS       100
+ * 2KB 事务的持锁时长: 18MHz 下纯线速 0.91ms, 见 spi_timeout_ms 的说明. */
+static const uint32_t lock_timeout_ms = 100U;
 
 /* ================================================================
  * 临界区回调
@@ -91,7 +91,7 @@ static void port_cs_select(void)
      *
      * 失败就断言: 回调签名没有返回错误的通道, 静默继续会导致两个任务的帧
      * 在 MOSI 上交错, 现象是"偶发读到错误寄存器值", 极难定位。宁可当场响。 */
-    BSP_ASSERT(SpiBus_Lock(W5500_SPI_BUS, W5500_LOCK_TIMEOUT_MS) == 0);
+    BSP_ASSERT(SpiBus_Lock(W5500_SPI_BUS, lock_timeout_ms) == 0);
     BSP_W5500_HW_CsLow();
 }
 
@@ -111,14 +111,14 @@ static void port_cs_deselect(void)
 
 static void port_spi_write(uint8_t wb)
 {
-    (void)BSP_SPI_Transfer(W5500_SPI_BUS, wb, W5500_SPI_TIMEOUT_MS);
+    (void)BSP_SPI_Transfer(W5500_SPI_BUS, wb, spi_timeout_ms);
 }
 
 static uint8_t port_spi_read(void)
 {
     /* 0xFF 是 dummy —— W5500 在读方向忽略 MOSI。
      * 用 0xFF 而不是 0x00 是习惯: MOSI 空闲为高。 */
-    return BSP_SPI_Transfer(W5500_SPI_BUS, 0xFF, W5500_SPI_TIMEOUT_MS);
+    return BSP_SPI_Transfer(W5500_SPI_BUS, 0xFF, spi_timeout_ms);
 }
 
 /* ================================================================
@@ -132,14 +132,14 @@ static void port_spi_read_burst(uint8_t *pBuf, uint16_t len)
 {
     /* 读方向 不关心写什么，采用原地传输, 不用为 dummy 再开一块缓冲 */
     BSP_ASSERT(BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, pBuf, len,
-                                      W5500_SPI_TIMEOUT_MS) == BSP_SPI_OK);
+                                      spi_timeout_ms) == BSP_SPI_OK);
 }
 
 static void port_spi_write_burst(uint8_t *pBuf, uint16_t len)
 {
     /* 写方向不关心收到的字节 —— rx 传 NULL, BSP 会走 HAL_SPI_Transmit */
     BSP_ASSERT(BSP_SPI_TransferBuffer(W5500_SPI_BUS, pBuf, NULL, len,
-                                      W5500_SPI_TIMEOUT_MS) == BSP_SPI_OK);
+                                      spi_timeout_ms) == BSP_SPI_OK);
 }
 
 /* ================================================================

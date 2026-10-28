@@ -53,7 +53,7 @@ void BSP_KEY_Init(void)
  * @param  key  按键编号
  * @return BSP_KEY_PRESSED / BSP_KEY_RELEASED
  */
-uint8_t BSP_KEY_Scan(BSP_KEY_Id_t key)
+BSP_Key_State_t BSP_KEY_Scan(BSP_KEY_Id_t key)
 {
     if (key >= BSP_KEY_COUNT) return BSP_KEY_RELEASED;
 

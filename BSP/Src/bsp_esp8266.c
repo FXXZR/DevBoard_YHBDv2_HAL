@@ -31,8 +31,8 @@ static inline void delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
 #define ESP8266_USART_ID        BSP_USART3
 
 /* 复位时序 (毫秒) */
-#define RESET_LOW_MS            10U
-#define RESET_BOOT_MS           200U
+static const uint32_t reset_low_ms  = 10U;
+static const uint32_t reset_boot_ms = 200U;
 
 /* ================================================================
  * 运行时上下文
@@ -115,7 +115,7 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
 
     /* ---- 释放复位: TX 线已稳定为高, ESP8266 正常启动 ---- */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_SET);
-    delay_ms(RESET_BOOT_MS);  /* 等待模块固件启动 */
+    delay_ms(reset_boot_ms);  /* 等待模块固件启动 */
 
     /* 清空启动期间 ESP8266 可能发出的数据 (boot ROM 74880baud 噪声等) */
     BSP_USART_FlushRx(ESP8266_USART_ID);
@@ -177,11 +177,11 @@ void BSP_ESP8266_Reset(void)
 
     /* 拉低 RST ≥100μs, 用 10ms 保证足够裕量 */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_RESET);
-    delay_ms(RESET_LOW_MS);
+    delay_ms(reset_low_ms);
 
     /* 拉高 RST, 等待模块启动 */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_SET);
-    delay_ms(RESET_BOOT_MS);
+    delay_ms(reset_boot_ms);
 
     /* 清空 USART3 接收缓冲 (复位期间可能产生乱码) */
     BSP_ESP8266_FlushRx();

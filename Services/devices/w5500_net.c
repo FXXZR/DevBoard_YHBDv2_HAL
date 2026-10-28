@@ -24,13 +24,21 @@
  * 内部
  * ================================================================ */
 
-/* 关连接时等 Sn_SR 变 CLOSED 的期限。正常约 1 个 RTT (毫秒级);
- * 对端不可达时靠这个值把等待切断, 不让任务无限期挂住。 */
-#define W5500_CLOSE_TIMEOUT_MS          2000
-/* 发完强制 CLOSE 命令后再给芯片的时间 (命令本身是立即生效的) */
-#define W5500_CLOSE_FORCE_WAIT_MS       100
-/* 发出 FIN 后等对端也关的期限 —— 对端应用通常毫秒级就跟着关, 这里只是兜底 */
-#define W5500_FIN_WAIT_MS               500
+/* 关连接时序 —— 三个期限同属"关一个 socket"这一件事。
+ * 类型只在本文件出现、也不作为参数传递, 所以用匿名结构体, 不起类型名。 */
+static const struct {
+    /* 等 Sn_SR 变 CLOSED 的期限。正常约 1 个 RTT (毫秒级);
+     * 对端不可达时靠这个值把等待切断, 不让任务无限期挂住。 */
+    uint32_t close_ms;
+    /* 发完强制 CLOSE 命令后再给芯片的时间 (命令本身是立即生效的) */
+    uint32_t force_wait_ms;
+    /* 发出 FIN 后等对端也关的期限 —— 对端应用通常毫秒级就跟着关, 这里只是兜底 */
+    uint32_t fin_wait_ms;
+} close_timeout = {
+    .close_ms      = 2000U,
+    .force_wait_ms = 100U,
+    .fin_wait_ms   = 500U,
+};
 
 /* TCP 的打开 flag 只开 SF_TCP_NODELAY —— 理由与警告见 W5500_Sock_TcpOpen */
 
@@ -559,7 +567,7 @@ void W5500_Sock_Close(uint8_t sn)
 
         /* ★ 自己带期限等, 等不到就【强制关闭】: 不能直接调 close(), 它内部是
          *   无超时忙等, 对端不可达时网络任务整个卡死 (见本地疑难问题记录 006)。 */
-        if (s_wait_closed(sn, W5500_CLOSE_TIMEOUT_MS)) {
+        if (s_wait_closed(sn, close_timeout.close_ms)) {
             close(sn);
             return;
         }
@@ -571,7 +579,7 @@ void W5500_Sock_Close(uint8_t sn)
             LOG_W("sn%d 超时放弃时芯片已进 %s, 先发 FIN 通知对端", sn, s_state_str(sr));
             setSn_CR(sn, Sn_CR_DISCON);
             s_wait_cmd_done(sn);
-            if (s_wait_closed(sn, W5500_FIN_WAIT_MS)) {
+            if (s_wait_closed(sn, close_timeout.fin_wait_ms)) {
                 close(sn);
                 return;
             }
@@ -592,7 +600,7 @@ void W5500_Sock_Close(uint8_t sn)
         s_wait_cmd_done(sn);
         /* 兜底再等一下; 仍未 CLOSED 说明是芯片级故障, 下面 close() 会阻塞,
          * 那就该由断言通道响了 —— 但那是硬件坏了, 与本处逻辑无关 */
-        (void)s_wait_closed(sn, W5500_CLOSE_FORCE_WAIT_MS);
+        (void)s_wait_closed(sn, close_timeout.force_wait_ms);
     }
 
     /* 此时 Sn_SR 已是 CLOSED, close() 内部第一轮就返回; 它的作用是

@@ -48,8 +48,10 @@ extern "C" {
  * @note  正常路径请给有限超时。RTOS 下最怕某任务卡死在锁上: 心跳灯照闪、
  *        系统看起来还活着, 但功能全无, 而且没有栈回溯可查。
  *        给有限超时至少能让调用方走错误分支、把日志打出来。
+ * @note  用宏而不是匿名 enum: 0xFFFFFFFF 超出 int 的表示范围, 而枚举常量
+ *        按 C 标准必须能放进 int。数值带 UL 后缀, 类型是 unsigned long。
  */
-enum { SPI_BUS_WAIT_FOREVER = 0xFFFFFFFFUL };
+#define SPI_BUS_WAIT_FOREVER  0xFFFFFFFFUL
 
 /* ================================================================
  * API

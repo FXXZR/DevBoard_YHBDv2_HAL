@@ -35,7 +35,7 @@
 /* 单字符轮询重试上限 —— 约几十毫秒 @72MHz.
  * 有这个上限, USART1 未使能时不会死等: 一个卡死的 panic 处理器比没有更糟,
  * 因为此时中断已关, 连看门狗都救不回来. */
-#define PANIC_SPIN_LIMIT    400000U
+static const uint32_t panic_spin_limit = 400000U;
 
 /* ================================================================
  * 内部状态
@@ -54,7 +54,7 @@ static void panic_putc(char c)
 
     if (!s_uart_usable) return;
 
-    guard = PANIC_SPIN_LIMIT;
+    guard = panic_spin_limit;
     while (!(PANIC_UART->SR & USART_SR_TXE)) {
         if (--guard == 0U) { s_uart_usable = 0U; return; }
     }
@@ -87,7 +87,7 @@ static void panic_uart_takeover(void)
     }
 
     /* ② 等当前字节真正移出, 保证接管前的输出不被截断 (最多一字符时间) */
-    guard = PANIC_SPIN_LIMIT;
+    guard = panic_spin_limit;
     while (!(PANIC_UART->SR & USART_SR_TC)) {
         if (--guard == 0U) break;
     }
