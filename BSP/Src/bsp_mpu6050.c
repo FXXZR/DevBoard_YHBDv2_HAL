@@ -49,39 +49,60 @@
 
 /* ================================================================
  * 内部常量 (static const — 不对外暴露)
+ *
+ * 按功能分三组: 寄存器地址 / 初始化配置与换算系数 / 总线速率。
+ * 类型不导出, 所以用匿名 struct, 靠实例名区分字段归属。
  * ================================================================ */
 
-static const uint32_t kI2cSpeed           = 400000;   /* 400KHz (共享总线统一速率) */
+static const uint32_t mpu6050_i2c_speed = 400000U;   /* 400KHz (共享总线统一速率) */
 
-/* ---- 寄存器地址 ---- */
-static const uint8_t kRegPwrMgmt1        = 0x6B;    /* 电源管理 1 */
-static const uint8_t kRegSmplrtDiv       = 0x19;    /* 采样率分频器 */
-static const uint8_t kRegConfig          = 0x1A;    /* 配置 (DLPF) */
-static const uint8_t kRegGyroConfig      = 0x1B;    /* 陀螺仪配置 */
-static const uint8_t kRegAccelConfig     = 0x1C;    /* 加速度计配置 */
-static const uint8_t kRegAccelXoutH      = 0x3B;    /* 加速度数据起始 (burst read 起点) */
-static const uint8_t kRegWhoAmI          = 0x75;    /* WHO_AM_I 设备 ID */
+/* ---- 寄存器地址 (RM-MPU-6000A-00) ---- */
+static const struct {
+    uint8_t pwr_mgmt1;      /* 电源管理 1 */
+    uint8_t smplrt_div;     /* 采样率分频器 */
+    uint8_t config;         /* 配置 (DLPF) */
+    uint8_t gyro_config;    /* 陀螺仪配置 */
+    uint8_t accel_config;   /* 加速度计配置 */
+    uint8_t accel_xout_h;   /* 加速度数据起始 (burst read 起点) */
+    uint8_t who_am_i;       /* WHO_AM_I 设备 ID */
+} mpu6050_regs = {
+    .pwr_mgmt1    = 0x6B,
+    .smplrt_div   = 0x19,
+    .config       = 0x1A,
+    .gyro_config  = 0x1B,
+    .accel_config = 0x1C,
+    .accel_xout_h = 0x3B,
+    .who_am_i     = 0x75,
+};
 
-/* ---- 配置值 ---- */
-static const uint8_t  kValWakeUp         = 0x00;    /* PWR_MGMT_1: 唤醒, 内部 8MHz 时钟 */
-static const uint8_t  kValSmplrtDiv      = 0x07;    /* 采样率 = 8kHz / (1+7) = 1kHz */
-static const uint8_t  kValConfig         = 0x06;    /* DLPF_CFG=6 → 5Hz 带宽 */
-static const uint8_t  kValAccelConfig    = 0x08;    /* AFS_SEL=1 → ±4g, HPF bypass */
-static const uint8_t  kValGyroConfig     = 0x18;    /* FS_SEL=3 → ±2000°/s, 自检关闭 */
+/* ---- 初始化配置值与换算系数 ---- */
+static const struct {
+    uint8_t  wake_up;             /* PWR_MGMT_1: 唤醒, 内部 8MHz 时钟 */
+    uint8_t  smplrt_div;          /* 采样率 = 8kHz / (1+7) = 1kHz */
+    uint8_t  dlpf_cfg;            /* DLPF_CFG=6 → 5Hz 带宽 */
+    uint8_t  accel_fs;            /* AFS_SEL=1 → ±4g, HPF bypass */
+    uint8_t  gyro_fs;             /* FS_SEL=3 → ±2000°/s, 自检关闭 */
+    uint8_t  who_am_i_expected;
+    uint32_t pwr_on_delay_ms;     /* 上电稳定延时 */
+    uint32_t stabilize_delay_ms;  /* 配置后稳定延时 */
+    float    temp_scale;          /* 温度公式: raw/340 + 36.53 */
+    float    temp_offset;
+} mpu6050_cfg = {
+    .wake_up            = 0x00,
+    .smplrt_div         = 0x07,
+    .dlpf_cfg           = 0x06,
+    .accel_fs           = 0x08,
+    .gyro_fs            = 0x18,
+    .who_am_i_expected  = 0x68,
+    .pwr_on_delay_ms    = 100U,
+    .stabilize_delay_ms = 200U,
+    .temp_scale         = 340.0f,
+    .temp_offset        = 36.53f,
+};
 
-/* ---- 延时 ---- */
-static const uint32_t kPwrOnDelayMs      = 100;     /* 上电稳定延时 */
-static const uint32_t kStabilizeDelayMs  = 200;     /* 配置后稳定延时 */
-
-/* ---- 转换系数 ---- */
-static const float    kTempScale         = 340.0f;   /* 温度公式: raw/340 + 36.53 */
-static const float    kTempOffset        = 36.53f;
-
-/* ---- WHO_AM_I 期望值 ---- */
-static const uint8_t  kWhoAmIExpected    = 0x68;
-
-/* ---- 数据 burst read: 0x3B 起连续 14 字节 ---- */
-static const uint8_t  kBurstLen          = 14;
+/* 数据 burst read 长度: 0x3B 起连续 14 字节。
+ * 要当栈数组尺寸用, 必须是编译期整数 —— 按规范这类用宏。 */
+#define MPU6050_BURST_LEN   14U
 
 /* ================================================================
  * 内部: 错误码映射 — 将 I2C 层错误码映射为 MPU6050 层错误码
@@ -149,7 +170,7 @@ static void mpu6050_parse_data(const uint8_t buf[], BSP_MPU6050_Data_t *p_data)
     /* 温度: 大端 → 先转为 signed int16_t, 再换算 °C */
     {
         int16_t raw_temp = (int16_t)((buf[6] << 8) | buf[7]);
-        p_data->temp_c = (float)raw_temp / kTempScale + kTempOffset;
+        p_data->temp_c = (float)raw_temp / mpu6050_cfg.temp_scale + mpu6050_cfg.temp_offset;
     }
 
     /* 陀螺仪: 大端 → int16_t */
@@ -167,41 +188,41 @@ BSP_MPU6050_Status_t BSP_MPU6050_Init(void)
     BSP_MPU6050_Status_t ret;
 
     /* ---- I2C 总线初始化 (幂等) ---- */
-    mpu6050_i2c_init(MPU6050_I2C_BUS_ID, kI2cSpeed);
+    mpu6050_i2c_init(MPU6050_I2C_BUS_ID, mpu6050_i2c_speed);
 
     /* ---- 上电稳定延时 ---- */
-    BSP_SYSTICK_DelayMS(kPwrOnDelayMs);
+    BSP_SYSTICK_DelayMS(mpu6050_cfg.pwr_on_delay_ms);
 
     /* ---- 唤醒设备 (退出睡眠模式) ---- */
-    ret = mpu6050_write_reg(kRegPwrMgmt1, kValWakeUp);
+    ret = mpu6050_write_reg(mpu6050_regs.pwr_mgmt1, mpu6050_cfg.wake_up);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置采样率: 1kHz ---- */
-    ret = mpu6050_write_reg(kRegSmplrtDiv, kValSmplrtDiv);
+    ret = mpu6050_write_reg(mpu6050_regs.smplrt_div, mpu6050_cfg.smplrt_div);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置 DLPF: 5Hz 带宽 ---- */
-    ret = mpu6050_write_reg(kRegConfig, kValConfig);
+    ret = mpu6050_write_reg(mpu6050_regs.config, mpu6050_cfg.dlpf_cfg);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置加速度计: ±4g ---- */
-    ret = mpu6050_write_reg(kRegAccelConfig, kValAccelConfig);
+    ret = mpu6050_write_reg(mpu6050_regs.accel_config, mpu6050_cfg.accel_fs);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置陀螺仪: ±2000°/s ---- */
-    ret = mpu6050_write_reg(kRegGyroConfig, kValGyroConfig);
+    ret = mpu6050_write_reg(mpu6050_regs.gyro_config, mpu6050_cfg.gyro_fs);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 等待 PLL 稳定 ---- */
-    BSP_SYSTICK_DelayMS(kStabilizeDelayMs);
+    BSP_SYSTICK_DelayMS(mpu6050_cfg.stabilize_delay_ms);
 
     /* ---- WHO_AM_I 校验 ---- */
     {
         uint8_t who_am_i = 0;
-        ret = mpu6050_read_regs(kRegWhoAmI, &who_am_i, 1);
+        ret = mpu6050_read_regs(mpu6050_regs.who_am_i, &who_am_i, 1);
         if (ret != BSP_MPU6050_OK) return ret;
 
-        if (who_am_i != kWhoAmIExpected) {
+        if (who_am_i != mpu6050_cfg.who_am_i_expected) {
             return BSP_MPU6050_ERR_ID_MISMATCH;
         }
     }
@@ -213,8 +234,8 @@ BSP_MPU6050_Status_t BSP_MPU6050_ReadAll(BSP_MPU6050_Data_t *p_data)
 {
     if (!p_data) return BSP_MPU6050_ERROR;
 
-    uint8_t buf[kBurstLen];
-    BSP_MPU6050_Status_t ret = mpu6050_read_regs(kRegAccelXoutH, buf, kBurstLen);
+    uint8_t buf[MPU6050_BURST_LEN];
+    BSP_MPU6050_Status_t ret = mpu6050_read_regs(mpu6050_regs.accel_xout_h, buf, MPU6050_BURST_LEN);
     if (ret != BSP_MPU6050_OK) return ret;
 
     mpu6050_parse_data(buf, p_data);

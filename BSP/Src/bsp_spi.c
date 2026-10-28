@@ -64,7 +64,7 @@ static const SPI_HW_Map_t spi_hw_map[BSP_SPI_BUS_COUNT] = {
  * 内部常量 — BaudPrescaler enum → HAL 值映射
  * ================================================================ */
 
-static const uint32_t kPrescalerToHal[] = {
+static const uint32_t spi_prescaler_to_hal[] = {
     [BSP_SPI_BAUD_DIV_2]   = SPI_BAUDRATEPRESCALER_2,
     [BSP_SPI_BAUD_DIV_4]   = SPI_BAUDRATEPRESCALER_4,
     [BSP_SPI_BAUD_DIV_8]   = SPI_BAUDRATEPRESCALER_8,
@@ -157,7 +157,7 @@ void BSP_SPI_Init(BSP_SPI_Bus_Id_t id, BSP_SPI_BaudPrescaler_t prescaler)
 
     /* 2. HAL SPI 初始化 */
     ctx->handle.Instance               = hw->instance;
-    ctx->handle.Init.BaudRatePrescaler = kPrescalerToHal[prescaler];
+    ctx->handle.Init.BaudRatePrescaler = spi_prescaler_to_hal[prescaler];
     ctx->handle.Init.Direction         = SPI_DIRECTION_2LINES;
     ctx->handle.Init.CLKPhase          = hw->clk_phase;      /* 每条总线固定 */
     ctx->handle.Init.CLKPolarity       = hw->clk_polarity;   /* 见映射表注释 */

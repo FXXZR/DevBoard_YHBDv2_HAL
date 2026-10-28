@@ -39,18 +39,32 @@ static inline void delay_us(uint32_t us) { BSP_SYSTICK_DelayUS(us); }
  * W25Q64 指令集 (内部常量)
  * ================================================================ */
 
-static const uint8_t kCmdWriteEnable       = 0x06;
-static const uint8_t kCmdReadStatus1       = 0x05;
-static const uint8_t kCmdReadData          = 0x03;
-static const uint8_t kCmdPageProgram       = 0x02;
-static const uint8_t kCmdSectorErase       = 0x20;
-static const uint8_t kCmdBlockErase64K     = 0xD8;
-static const uint8_t kCmdChipErase         = 0xC7;
-static const uint8_t kCmdJedecID           = 0x9F;
-static const uint8_t kCmdPowerDown         = 0xB9;
-static const uint8_t kCmdReleasePowerDown  = 0xAB;
+static const struct {
+    uint8_t write_enable;
+    uint8_t read_status1;
+    uint8_t read_data;
+    uint8_t page_program;
+    uint8_t sector_erase;
+    uint8_t block_erase_64k;
+    uint8_t chip_erase;
+    uint8_t jedec_id;
+    uint8_t power_down;
+    uint8_t release_power_down;
+} spi_flash_cmds = {
+    .write_enable       = 0x06,
+    .read_status1       = 0x05,
+    .read_data          = 0x03,
+    .page_program       = 0x02,
+    .sector_erase       = 0x20,
+    .block_erase_64k    = 0xD8,
+    .chip_erase         = 0xC7,
+    .jedec_id           = 0x9F,
+    .power_down         = 0xB9,
+    .release_power_down = 0xAB,
+};
 
-static const uint8_t kStatusBusy           = 0x01;
+/* 状态寄存器 1 的 BUSY 位 (语义是位掩码, 不并进指令表) */
+static const uint8_t spi_flash_status_busy = 0x01U;
 
 /* ================================================================
  * 内部辅助函数
@@ -64,7 +78,7 @@ static inline uint8_t spi_flash_byte(uint8_t data)
 static void spi_flash_write_enable(void)
 {
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdWriteEnable);
+    spi_flash_byte(spi_flash_cmds.write_enable);
     FLASH_CS_HIGH();
 }
 
@@ -72,7 +86,7 @@ static uint8_t spi_flash_read_status(void)
 {
     uint8_t status;
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdReadStatus1);
+    spi_flash_byte(spi_flash_cmds.read_status1);
     status = spi_flash_byte(0xFF);
     FLASH_CS_HIGH();
     return status;
@@ -87,7 +101,7 @@ static BSP_SPI_FLASH_Status_t spi_flash_wait_busy(uint32_t timeout_ms)
 {
     uint32_t elapsed_us = 0;
     uint32_t limit_us   = timeout_ms * 1000U;
-    while (spi_flash_read_status() & kStatusBusy) {
+    while (spi_flash_read_status() & spi_flash_status_busy) {
         if (elapsed_us >= limit_us) {
             return BSP_SPI_FLASH_TIMEOUT;
         }
@@ -117,7 +131,7 @@ static BSP_SPI_FLASH_Status_t spi_flash_page_write(const uint8_t *buf, uint32_t 
     spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdPageProgram);
+    spi_flash_byte(spi_flash_cmds.page_program);
     spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
     spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
     spi_flash_byte((uint8_t)( addr        & 0xFF));
@@ -160,7 +174,7 @@ uint32_t BSP_SPI_FLASH_ReadID(void)
     uint32_t id = 0;
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdJedecID);
+    spi_flash_byte(spi_flash_cmds.jedec_id);
     id  = (uint32_t)spi_flash_byte(0xFF) << 16;
     id |= (uint32_t)spi_flash_byte(0xFF) << 8;
     id |= (uint32_t)spi_flash_byte(0xFF);
@@ -179,7 +193,7 @@ void BSP_SPI_FLASH_Read(uint8_t *buf, uint32_t addr, uint32_t len)
     if (addr + len > BSP_SPI_FLASH_CAPACITY) return;
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdReadData);
+    spi_flash_byte(spi_flash_cmds.read_data);
     spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
     spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
     spi_flash_byte((uint8_t)( addr        & 0xFF));
@@ -236,7 +250,7 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_SectorErase(uint32_t addr)
     spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdSectorErase);
+    spi_flash_byte(spi_flash_cmds.sector_erase);
     spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
     spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
     spi_flash_byte((uint8_t)( addr        & 0xFF));
@@ -252,7 +266,7 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_BlockErase(uint32_t addr)
     spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdBlockErase64K);
+    spi_flash_byte(spi_flash_cmds.block_erase_64k);
     spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
     spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
     spi_flash_byte((uint8_t)( addr        & 0xFF));
@@ -266,7 +280,7 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_ChipErase(void)
     spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdChipErase);
+    spi_flash_byte(spi_flash_cmds.chip_erase);
     FLASH_CS_HIGH();
 
     return spi_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_CHIP);
@@ -275,13 +289,13 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_ChipErase(void)
 void BSP_SPI_FLASH_PowerDown(void)
 {
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdPowerDown);
+    spi_flash_byte(spi_flash_cmds.power_down);
     FLASH_CS_HIGH();
 }
 
 void BSP_SPI_FLASH_Wakeup(void)
 {
     FLASH_CS_LOW();
-    spi_flash_byte(kCmdReleasePowerDown);
+    spi_flash_byte(spi_flash_cmds.release_power_down);
     FLASH_CS_HIGH();
 }

@@ -14,8 +14,10 @@
 
 #include "bsp_sdcard.h"
 
-/* 驱动号定义 */
-#define DRIVE_SD_CARD   0
+/* 驱动号定义: 本工程只挂一张 SD 卡 */
+static const uint8_t drive_sd_card = 0U;
+
+/* 扇区大小必须是编译期整数 (用作栈数组尺寸), 按规范用宏 */
 #define SD_BLOCKSIZE    512
 
 /*-----------------------------------------------------------------------*/
@@ -23,7 +25,7 @@
 /*-----------------------------------------------------------------------*/
 DSTATUS disk_status(BYTE pdrv)
 {
-    if (pdrv != DRIVE_SD_CARD) return STA_NOINIT;
+    if (pdrv != drive_sd_card) return STA_NOINIT;
     if (!BSP_SDCARD_IsReady(BSP_SDCARD_BUS_1)) return STA_NOINIT;
     return 0;
 }
@@ -33,7 +35,7 @@ DSTATUS disk_status(BYTE pdrv)
 /*-----------------------------------------------------------------------*/
 DSTATUS disk_initialize(BYTE pdrv)
 {
-    if (pdrv != DRIVE_SD_CARD) return STA_NOINIT;
+    if (pdrv != drive_sd_card) return STA_NOINIT;
 
     if (BSP_SDCARD_Init(BSP_SDCARD_BUS_1) == BSP_SDCARD_OK) {
         return 0;
@@ -51,7 +53,7 @@ DRESULT disk_read(
     UINT count
 )
 {
-    if (pdrv != DRIVE_SD_CARD) return RES_PARERR;
+    if (pdrv != drive_sd_card) return RES_PARERR;
     if (count == 0) return RES_PARERR;
 
     /* DMA 要求 4 字节对齐 — 非对齐时使用 bounce buffer */
@@ -60,7 +62,7 @@ DRESULT disk_read(
         DWORD scratch[SD_BLOCKSIZE / 4];
 
         while (count--) {
-            res = disk_read(DRIVE_SD_CARD, (BYTE *)scratch, sector++, 1);
+            res = disk_read(drive_sd_card, (BYTE *)scratch, sector++, 1);
             if (res != RES_OK) break;
             memcpy(buff, scratch, SD_BLOCKSIZE);
             buff += SD_BLOCKSIZE;
@@ -85,7 +87,7 @@ DRESULT disk_write(
     UINT count
 )
 {
-    if (pdrv != DRIVE_SD_CARD) return RES_PARERR;
+    if (pdrv != drive_sd_card) return RES_PARERR;
     if (count == 0) return RES_PARERR;
 
     /* DMA 要求 4 字节对齐 — 非对齐时使用 bounce buffer */
@@ -95,7 +97,7 @@ DRESULT disk_write(
 
         while (count--) {
             memcpy(scratch, buff, SD_BLOCKSIZE);
-            res = disk_write(DRIVE_SD_CARD, (const BYTE *)scratch, sector++, 1);
+            res = disk_write(drive_sd_card, (const BYTE *)scratch, sector++, 1);
             if (res != RES_OK) break;
             buff += SD_BLOCKSIZE;
         }
@@ -118,7 +120,7 @@ DRESULT disk_ioctl(
     void *buff
 )
 {
-    if (pdrv != DRIVE_SD_CARD) return RES_PARERR;
+    if (pdrv != drive_sd_card) return RES_PARERR;
 
     BSP_SDCARD_CardInfo_t info;
 

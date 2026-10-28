@@ -53,28 +53,44 @@
 
 /* ================================================================
  * 内部常量 (static const)
+ *
+ * 按功能分组: 寄存器地址 / 配置值与延时 / 量程换算表 / 总线速率。
  * ================================================================ */
 
-static const uint32_t kI2cSpeed           = 400000;
+static const uint32_t ap3216c_i2c_speed = 400000U;
 
 /* ---- 寄存器地址 ---- */
-static const uint8_t kRegSysConfig        = 0x00;
-static const uint8_t kRegIntStatus        = 0x01;
-static const uint8_t kRegIrDataLow        = 0x0A;
-static const uint8_t kRegAlsDataLow       = 0x0C;
-static const uint8_t kRegPsDataLow        = 0x0E;
-static const uint8_t kRegAlsConfig        = 0x10;
+static const struct {
+    uint8_t sys_config;
+    uint8_t int_status;
+    uint8_t ir_data_low;
+    uint8_t als_data_low;
+    uint8_t ps_data_low;
+    uint8_t als_config;
+} ap3216c_regs = {
+    .sys_config   = 0x00,
+    .int_status   = 0x01,
+    .ir_data_low  = 0x0A,
+    .als_data_low = 0x0C,
+    .ps_data_low  = 0x0E,
+    .als_config   = 0x10,
+};
 
-/* ---- 配置值 ---- */
-static const uint8_t  kValSwReset         = 0x04;
-static const uint8_t  kValAlsPsActive     = 0x03;
+/* ---- 配置值与延时 ---- */
+static const struct {
+    uint8_t  sw_reset;
+    uint8_t  als_ps_active;
+    uint32_t reset_delay_ms;
+    uint32_t mode_set_delay_ms;
+} ap3216c_cfg = {
+    .sw_reset          = 0x04,
+    .als_ps_active     = 0x03,
+    .reset_delay_ms    = 100U,
+    .mode_set_delay_ms = 100U,
+};
 
-/* ---- ALS 量程 → lux/count 分辨率 ---- */
-static const float    kAlsResolution[4]   = { 0.35f, 0.0788f, 0.0197f, 0.0049f };
-
-/* ---- 延时 ---- */
-static const uint32_t kResetDelayMs       = 100;
-static const uint32_t kModeSetDelayMs     = 100;
+/* ALS 量程 → lux/count 分辨率 (查表, 下标对应 BSP_AP3216C_AlsRange_t) */
+static const float ap3216c_als_resolution[4] = { 0.35f, 0.0788f, 0.0197f, 0.0049f };
 
 /* ================================================================
  * 模块级状态: 记录当前 ALS 量程
@@ -145,30 +161,30 @@ BSP_AP3216C_Status_t BSP_AP3216C_Init(BSP_AP3216C_AlsRange_t range)
     s_ap3216c_als_range = range;
 
     /* ---- I2C 总线初始化 (幂等) ---- */
-    ap3216c_i2c_init(AP3216C_I2C_BUS_ID, kI2cSpeed);
+    ap3216c_i2c_init(AP3216C_I2C_BUS_ID, ap3216c_i2c_speed);
 
     /* ---- 软件复位 ---- */
-    ret = ap3216c_write_reg(kRegSysConfig, kValSwReset);
+    ret = ap3216c_write_reg(ap3216c_regs.sys_config, ap3216c_cfg.sw_reset);
     if (ret != BSP_AP3216C_OK) return ret;
 
-    BSP_SYSTICK_DelayMS(kResetDelayMs);
+    BSP_SYSTICK_DelayMS(ap3216c_cfg.reset_delay_ms);
 
     /* ---- ALS 量程配置 (RMW, 对齐官方 ap3216c_set_param) ---- */
     if (range != BSP_AP3216C_ALS_RANGE_20661) {
         uint8_t val;
-        ret = ap3216c_read_regs(kRegAlsConfig, &val, 1);
+        ret = ap3216c_read_regs(ap3216c_regs.als_config, &val, 1);
         if (ret != BSP_AP3216C_OK) return ret;
         val &= 0xCF;
         val |= (uint8_t)(range << 4);
-        ret = ap3216c_write_reg(kRegAlsConfig, val);
+        ret = ap3216c_write_reg(ap3216c_regs.als_config, val);
         if (ret != BSP_AP3216C_OK) return ret;
     }
 
     /* ---- 设置 ALS + PS 同时工作模式 ---- */
-    ret = ap3216c_write_reg(kRegSysConfig, kValAlsPsActive);
+    ret = ap3216c_write_reg(ap3216c_regs.sys_config, ap3216c_cfg.als_ps_active);
     if (ret != BSP_AP3216C_OK) return ret;
 
-    BSP_SYSTICK_DelayMS(kModeSetDelayMs);
+    BSP_SYSTICK_DelayMS(ap3216c_cfg.mode_set_delay_ms);
 
     return BSP_AP3216C_OK;
 }
@@ -188,16 +204,16 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadAll(BSP_AP3216C_Data_t *p_data)
     /* ---- 1. 读中断状态 (官方先读此寄存器) ---- */
     {
         uint8_t dummy = 0;
-        (void)ap3216c_read_regs(kRegIntStatus, &dummy, 1);
+        (void)ap3216c_read_regs(ap3216c_regs.int_status, &dummy, 1);
     }
 
     /* ---- 2. ALS: 低字节 + 高字节 (对齐官方 read_low_and_high) ---- */
-    ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
+    ret = ap3216c_read_two_regs(ap3216c_regs.als_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
-    p_data->als_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_ap3216c_als_range];
+    p_data->als_lux = (float)(raw & 0xFFFF) * ap3216c_als_resolution[s_ap3216c_als_range];
 
     /* ---- 3. PS: 低字节 + 高字节 ---- */
-    ret = ap3216c_read_two_regs(kRegPsDataLow, &raw);
+    ret = ap3216c_read_two_regs(ap3216c_regs.ps_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     /* IR 饱和检查 (对齐官方: bit6 or bit14) */
@@ -206,7 +222,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadAll(BSP_AP3216C_Data_t *p_data)
     p_data->approaching  = (raw & 0x8000) ? 1 : 0;
 
     /* ---- 4. IR: 低字节 + 高字节 ---- */
-    ret = ap3216c_read_two_regs(kRegIrDataLow, &raw);
+    ret = ap3216c_read_two_regs(ap3216c_regs.ir_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
     p_data->ir = ((raw & 0x0003) + ((raw >> 8) & 0xFF)) & 0x03FF;
 
@@ -222,10 +238,10 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadALS(float *p_lux)
     if (!p_lux) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(ap3216c_regs.als_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
-    *p_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_ap3216c_als_range];
+    *p_lux = (float)(raw & 0xFFFF) * ap3216c_als_resolution[s_ap3216c_als_range];
     return BSP_AP3216C_OK;
 }
 
@@ -234,7 +250,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadPS(uint16_t *p_ps)
     if (!p_ps) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegPsDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(ap3216c_regs.ps_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *p_ps = ((raw & 0x000F) + (((raw >> 8) & 0x3F) << 4)) & 0x03FF;
@@ -246,7 +262,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadIR(uint16_t *p_ir)
     if (!p_ir) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegIrDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(ap3216c_regs.ir_data_low, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *p_ir = ((raw & 0x0003) + ((raw >> 8) & 0xFF)) & 0x03FF;

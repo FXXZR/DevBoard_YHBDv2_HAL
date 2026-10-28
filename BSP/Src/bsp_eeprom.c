@@ -47,9 +47,16 @@
  * 内部常量
  * ================================================================ */
 
-static const uint32_t kI2cSpeed        = 400000;   /* 400KHz (shared bus with MPU6050/AP3216C) */
-static const uint32_t kWriteWaitPolls  = 50;       /* 写周期轮询次数 */
-static const uint32_t kPollLoopCycles  = 2000;     /* 轮询间隔 (~200us @72MHz -O0) */
+static const uint32_t eeprom_i2c_speed = 400000U;   /* 400KHz (shared bus with MPU6050/AP3216C) */
+
+/* 写周期等待: 轮询次数 × 每次空循环 ~200us @72MHz -O0 */
+static const struct {
+    uint32_t write_wait_polls;   /* 写周期轮询次数 */
+    uint32_t poll_loop_cycles;   /* 轮询间隔 */
+} eeprom_write_timing = {
+    .write_wait_polls = 50U,
+    .poll_loop_cycles = 2000U,
+};
 
 /* ================================================================
  * 内部: 错误码映射 — 将 I2C 层错误码映射为 EEPROM 层错误码
@@ -72,14 +79,14 @@ static BSP_EEPROM_Status_t eeprom_map_i2c_err(uint32_t i2c_status)
 
 static void eeprom_wait_write_done(void)
 {
-    for (uint32_t i = 0; i < kWriteWaitPolls; i++) {
+    for (uint32_t i = 0; i < eeprom_write_timing.write_wait_polls; i++) {
         uint32_t ret = eeprom_i2c_ready(EEPROM_I2C_BUS_ID,
                                         (uint8_t)BSP_EEPROM_DEV_ADDR,
                                         1, 2);
         if (ret == EEPROM_I2C_OK) return;
 
         /* 轮询间隔 (~200us @72MHz -O0) */
-        for (volatile uint32_t d = 0; d < kPollLoopCycles; d++) {
+        for (volatile uint32_t d = 0; d < eeprom_write_timing.poll_loop_cycles; d++) {
             /* busy wait */
         }
     }
@@ -112,7 +119,7 @@ static BSP_EEPROM_Status_t eeprom_page_write(const uint8_t *buf, uint8_t addr, u
 
 void BSP_EEPROM_Init(void)
 {
-    eeprom_i2c_init(EEPROM_I2C_BUS_ID, kI2cSpeed);
+    eeprom_i2c_init(EEPROM_I2C_BUS_ID, eeprom_i2c_speed);
 }
 
 BSP_EEPROM_Status_t BSP_EEPROM_Read(uint8_t *buf, uint8_t addr, uint16_t len)

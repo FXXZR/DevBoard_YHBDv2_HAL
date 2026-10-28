@@ -23,8 +23,8 @@
 #define W5500_INT_PIN       GPIO_PIN_8
 
 /* 复位时序 —— 见 bsp_w5500_hw.h 的说明 */
-#define W5500_RESET_LOW_MS      1
-#define W5500_RESET_SETTLE_MS   100
+static const uint32_t w5500_reset_low_ms    = 1U;
+static const uint32_t w5500_reset_settle_ms = 100U;
 
 /* 一条总线 —— SPI2 (PB13/14/15, 模式 3, 见 bsp_spi.c 的硬件映射表) */
 #define W5500_SPI_BUS           BSP_SPI_BUS_2
@@ -32,7 +32,7 @@
 /* INT 中断: 线 8 落在 EXTI9_5 向量里 (与触摸的 PF9 共用, 分发在 bsp_exti.c)。
  * 优先级 7 —— 与触摸/串口同级, 且满足 FreeRTOS 的 ISR 调用门槛 (≥5)。 */
 #define W5500_INT_IRQ           EXTI9_5_IRQn
-#define W5500_INT_IRQ_PRIO      7
+static const uint32_t w5500_int_irq_prio = 7U;
 
 /* ================================================================
  * 状态
@@ -94,9 +94,9 @@ void BSP_W5500_HW_CsHigh(void)
 void BSP_W5500_HW_Reset(void)
 {
     W5500_RST_PORT->BRR  = W5500_RST_PIN;
-    BSP_SYSTICK_DelayMS(W5500_RESET_LOW_MS);
+    BSP_SYSTICK_DelayMS(w5500_reset_low_ms);
     W5500_RST_PORT->BSRR = W5500_RST_PIN;
-    BSP_SYSTICK_DelayMS(W5500_RESET_SETTLE_MS);
+    BSP_SYSTICK_DelayMS(w5500_reset_settle_ms);
 }
 
 uint8_t BSP_W5500_HW_IntLevel(void)
@@ -120,7 +120,7 @@ void BSP_W5500_HW_EnableInt(BSP_W5500_IntCallback_t cb)
     gpio.Pull = GPIO_PULLUP;
     HAL_GPIO_Init(W5500_INT_PORT, &gpio);
 
-    HAL_NVIC_SetPriority(W5500_INT_IRQ, W5500_INT_IRQ_PRIO, 0);
+    HAL_NVIC_SetPriority(W5500_INT_IRQ, w5500_int_irq_prio, 0);
     HAL_NVIC_EnableIRQ(W5500_INT_IRQ);
 }
 

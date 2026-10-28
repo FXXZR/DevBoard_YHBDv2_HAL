@@ -47,12 +47,20 @@ static const SoftI2C_HW_Map_t soft_i2c_hw_map[BSP_SOFT_I2C_BUS_COUNT] = {
  * 内部常量
  * ================================================================ */
 
-static const uint8_t kHalfPeriod100K = 5;
-static const uint8_t kHalfPeriod400K = 2;
-static const uint8_t kHalfPeriod1M   = 1;
-
-static const uint32_t kAckTimeoutCycles = 50000;   /* ACK 轮询超时 (~2.5ms @72MHz) */
-static const uint32_t kSclCheckCycles   = 100000;  /* SCL 回读超时 (~5ms @72MHz) */
+/* 各速率下的半周期延时 (空循环次数) 与两处轮询上限 */
+static const struct {
+    uint8_t  half_period_100k;
+    uint8_t  half_period_400k;
+    uint8_t  half_period_1m;
+    uint32_t ack_timeout_cycles;   /* ACK 轮询超时 (~2.5ms @72MHz) */
+    uint32_t scl_check_cycles;     /* SCL 回读超时 (~5ms @72MHz) */
+} soft_i2c_timing = {
+    .half_period_100k   = 5U,
+    .half_period_400k   = 2U,
+    .half_period_1m     = 1U,
+    .ack_timeout_cycles = 50000U,
+    .scl_check_cycles   = 100000U,
+};
 
 /* ================================================================
  * 运行时上下文
@@ -116,7 +124,7 @@ static inline uint8_t soft_i2c_scl_read(const SoftI2C_Ctx_t *ctx)
  */
 static uint8_t soft_i2c_scl_wait_high(const SoftI2C_Ctx_t *ctx)
 {
-    for (uint32_t to = 0; to < kSclCheckCycles; to++) {
+    for (uint32_t to = 0; to < soft_i2c_timing.scl_check_cycles; to++) {
         if (soft_i2c_scl_read(ctx)) return 0;
     }
     return 1;  /* 超时: SCL 被从设备或硬件故障长期拉低 */
@@ -185,7 +193,7 @@ static uint8_t soft_i2c_write_byte(const SoftI2C_Ctx_t *ctx, uint8_t byte)
 
     /* 轮询 ACK 带超时 */
     uint8_t ack = 0;
-    for (uint32_t to = 0; to < kAckTimeoutCycles; to++) {
+    for (uint32_t to = 0; to < soft_i2c_timing.ack_timeout_cycles; to++) {
         ack = soft_i2c_sda_read(ctx);
         if (ack == 0) break;  /* SDA 被从设备拉低 = ACK */
     }
@@ -271,9 +279,9 @@ void BSP_SoftI2C_Init(BSP_SoftI2C_Bus_Id_t id, BSP_SoftI2C_Speed_t speed)
 
     /* 4. 速度 → 半周期延时 */
     switch (speed) {
-    case BSP_SOFT_I2C_SPEED_400K: ctx->half_period = kHalfPeriod400K; break;
-    case BSP_SOFT_I2C_SPEED_1M:   ctx->half_period = kHalfPeriod1M;   break;
-    default:                      ctx->half_period = kHalfPeriod100K;  break;
+    case BSP_SOFT_I2C_SPEED_400K: ctx->half_period = soft_i2c_timing.half_period_400k; break;
+    case BSP_SOFT_I2C_SPEED_1M:   ctx->half_period = soft_i2c_timing.half_period_1m;   break;
+    default:                      ctx->half_period = soft_i2c_timing.half_period_100k;  break;
     }
 }
 
