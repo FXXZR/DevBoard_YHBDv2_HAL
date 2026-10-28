@@ -37,7 +37,14 @@ Claude Code 只从 `.claude/skills/` 加载技能；首次 clone 后运行
 
 ## Conventions
 
-- 错误码/状态码用 `typedef enum`; 模块内部常量用 `static const`; 头文件配置常量用匿名 `enum`
+- 错误码/状态码用 `typedef enum`; 数据类常量用 `static const`（成组时收进 `static const` 结构体）;
+  对外开放的配置在 `.h` 用宏只给数值/字符串, 实现侧用 `static const <类型>` 接住;
+  宏多了抽 `xxx_config.h` (只被 `.c` 包含)
+- 命名: 变量/常量 `snake_case`, 类型 `CamelCase`+`_t`, 宏与枚举常量 `UPPER_SNAKE`;
+  **不用 `k` 前缀 + 驼峰**
+- `s_` 只表示**文件作用域可变状态** (`s_ctx`/`s_net`); `static` 辅助函数与只读常量都不加该前缀
+- `static` 辅助函数一律带**模块前缀** (`eeprom_page_write()`/`ap3216c_write_reg()`), 不留光杆函数名
+- `.c` 内的可变状态集中到一个文件作用域结构体 (`s_ctx`), 不散落一长串 `s_xxx`
 - 日志用 `LOG_E/W/I/D`; `printf` 只用于临时排查
 - ⚠️ Release 必须写 `LOG_LEVEL_WARN`（宏）, **不是** `LOG_LVL_WARN`（enum）—— 后者会静默关掉全部日志
 - ⚠️ 日志 TX 环只有 512 B, 成组打印会静默丢行; 行间留 `vTaskDelay(20)` 或减少行数
