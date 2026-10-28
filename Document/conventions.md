@@ -324,10 +324,13 @@ BSP/Src/bsp_ili9341.c           #include 两者
 - 不要为了分组而分组：只有一两个常量就直接 `static const`；互不相关的常量不要塞进同一个“杂物筐”
 - 查表/数组本来就是一个常量（`spi_prescaler_to_hal[]`、`hw_map[]`），不需要再包一层结构体
 
-以 [bsp_mpu6050.c](../BSP/Src/bsp_mpu6050.c) 的 19 个平铺常量为反面例子，按功能收敛成 3 个实例：
+以 [bsp_mpu6050.c](../BSP/Src/bsp_mpu6050.c) 为例，19 个平铺常量按功能收敛成 3 个实例
+（类型只在 `.c` 内用，所以是匿名 struct）：
 
 ```c
-typedef struct {
+static const uint32_t mpu6050_i2c_speed = 400000U;
+
+static const struct {
     uint8_t pwr_mgmt1;
     uint8_t smplrt_div;
     uint8_t config;
@@ -335,9 +338,17 @@ typedef struct {
     uint8_t accel_config;
     uint8_t accel_xout_h;
     uint8_t who_am_i;
-} MpuRegs_t;
+} mpu6050_regs = {
+    .pwr_mgmt1    = 0x6B,
+    .smplrt_div   = 0x19,
+    .config       = 0x1A,
+    .gyro_config  = 0x1B,
+    .accel_config = 0x1C,
+    .accel_xout_h = 0x3B,
+    .who_am_i     = 0x75,
+};
 
-typedef struct {
+static const struct {
     uint8_t  wake_up;
     uint8_t  smplrt_div;
     uint8_t  dlpf_cfg;
@@ -348,27 +359,31 @@ typedef struct {
     uint32_t stabilize_delay_ms;
     float    temp_scale;
     float    temp_offset;
-} MpuCfg_t;
-
-static const MpuRegs_t mpu_regs = {
-    .pwr_mgmt1 = 0x6B, .smplrt_div = 0x19, .config = 0x1A,
-    .gyro_config = 0x1B, .accel_config = 0x1C, .accel_xout_h = 0x3B, .who_am_i = 0x75,
+} mpu6050_cfg = {
+    .wake_up            = 0x00,
+    .smplrt_div         = 0x07,
+    .dlpf_cfg           = 0x06,
+    .accel_fs           = 0x08,
+    .gyro_fs            = 0x18,
+    .who_am_i_expected  = 0x68,
+    .pwr_on_delay_ms    = 100U,
+    .stabilize_delay_ms = 200U,
+    .temp_scale         = 340.0f,
+    .temp_offset        = 36.53f,
 };
 
-static const MpuCfg_t mpu_cfg = {
-    .wake_up = 0x00, .smplrt_div = 0x07, .dlpf_cfg = 0x06,
-    .accel_fs = 0x08, .gyro_fs = 0x18, .who_am_i_expected = 0x68,
-    .pwr_on_delay_ms = 100U, .stabilize_delay_ms = 200U,
-    .temp_scale = 340.0f, .temp_offset = 36.53f,
-};
-
-static const uint32_t mpu_i2c_speed = 400000U;
+/* burst read 长度要当栈数组尺寸 → 编译期整数, 用宏 */
+#define MPU6050_BURST_LEN   14U
 ```
 
 判断是否“该分组”的两个问题：
 
 1. 这些值是否会在同一个函数里成组出现？是 → 一个结构体
 2. 加新常量时，你会不会纠结该叫什么前缀？会 → 它多半属于已有的一组
+
+**注意不要“为了分组而分组”**：单个常量、或彼此无关的常量（如上面的 I2C 速率）就各自
+`static const`；结构体成员里若有一个值需要当**数组尺寸**（编译期整数），它必须单独提成宏，
+不能用 `struct.field` 当数组长度 —— 那会变成 VLA。
 
 ### `typedef enum` 与匿名 `enum`
 
