@@ -70,7 +70,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
  * 内部辅助
  * ================================================================ */
 
-static ADC_Ctx_t *ctx_from_id(BSP_ADC_Id_t id)
+static ADC_Ctx_t *adc_ctx_from_id(BSP_ADC_Id_t id)
 {
     if (id >= BSP_ADC_COUNT) return NULL;
     return &adc_ctx[id];
@@ -140,21 +140,21 @@ void BSP_ADC_Init(BSP_ADC_Id_t id)
 
 void BSP_ADC_Start(BSP_ADC_Id_t id)
 {
-    ADC_Ctx_t *ctx = ctx_from_id(id);
+    ADC_Ctx_t *ctx = adc_ctx_from_id(id);
     if (!ctx || !ctx->initialized) return;
     HAL_ADC_Start_DMA(&ctx->hadc, (uint32_t *)&ctx->dma_value, 1);
 }
 
 void BSP_ADC_Stop(BSP_ADC_Id_t id)
 {
-    ADC_Ctx_t *ctx = ctx_from_id(id);
+    ADC_Ctx_t *ctx = adc_ctx_from_id(id);
     if (!ctx || !ctx->initialized) return;
     HAL_ADC_Stop_DMA(&ctx->hadc);
 }
 
 uint16_t BSP_ADC_Read_mV(BSP_ADC_Id_t id)
 {
-    ADC_Ctx_t *ctx = ctx_from_id(id);
+    ADC_Ctx_t *ctx = adc_ctx_from_id(id);
     if (!ctx || !ctx->initialized) return 0;
     return (uint16_t)((uint32_t)ctx->dma_value * BSP_ADC_VREF_MV / BSP_ADC_RES_MAX);
 }

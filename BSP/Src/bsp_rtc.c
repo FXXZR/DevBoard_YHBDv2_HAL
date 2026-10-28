@@ -62,7 +62,7 @@ static uint8_t          rtc_ready = 0;
  * ================================================================ */
 
 /** @brief 判断是否为闰年 */
-static int is_leap(uint8_t y)
+static int rtc_is_leap(uint8_t y)
 {
     uint16_t year = 2000U + y;
     return (year % 4U == 0U && (year % 100U != 0U || year % 400U == 0U));
@@ -102,7 +102,7 @@ void BSP_RTC_ts_to_dt(uint32_t ts, BSP_RTC_DateTime_t *dt)
     uint32_t days = ts / 24U;
     uint16_t y = 1970;
     while (1) {
-        uint16_t yd = (is_leap((uint8_t)(y - 2000))) ? 366U : 365U;
+        uint16_t yd = (rtc_is_leap((uint8_t)(y - 2000))) ? 366U : 365U;
         if (days < yd) break;
         days -= yd;
         y++;
@@ -111,7 +111,7 @@ void BSP_RTC_ts_to_dt(uint32_t ts, BSP_RTC_DateTime_t *dt)
     dt->month = 1;
     for (int m = 0; m < 12; m++) {
         uint8_t md = days_in_month[m];
-        if (m == 1 && is_leap(dt->year)) md = 29;
+        if (m == 1 && rtc_is_leap(dt->year)) md = 29;
         if (days < md) { dt->month = (uint8_t)(m + 1); break; }
         days -= md;
     }
@@ -129,7 +129,7 @@ uint32_t BSP_RTC_dt_to_ts(const BSP_RTC_DateTime_t *dt)
     }
     for (uint8_t m = 1; m < dt->month; m++) {
         uint8_t md = days_in_month[m - 1];
-        if (m == 2 && is_leap(dt->year)) md = 29;
+        if (m == 2 && rtc_is_leap(dt->year)) md = 29;
         days += md;
     }
     days += (uint32_t)(dt->date - 1);

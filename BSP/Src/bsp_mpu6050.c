@@ -90,7 +90,7 @@ static const uint8_t  kBurstLen          = 14;
 /**
  * @brief  将 I2C 层状态码映射为 MPU6050 层状态码 (保留 NACK/TIMEOUT 信息)
  */
-static BSP_MPU6050_Status_t map_i2c_err(uint32_t i2c_status)
+static BSP_MPU6050_Status_t mpu6050_map_i2c_err(uint32_t i2c_status)
 {
     if (i2c_status == MPU6050_I2C_OK)      return BSP_MPU6050_OK;
     if (i2c_status == MPU6050_I2C_TIMEOUT) return BSP_MPU6050_ERR_TIMEOUT;
@@ -103,25 +103,25 @@ static BSP_MPU6050_Status_t map_i2c_err(uint32_t i2c_status)
  * ================================================================ */
 
 /** @brief 向 MPU6050 寄存器单字节写 */
-static BSP_MPU6050_Status_t s_write_reg(uint8_t reg, uint8_t val)
+static BSP_MPU6050_Status_t mpu6050_write_reg(uint8_t reg, uint8_t val)
 {
     uint32_t ret = mpu6050_i2c_mem_write(MPU6050_I2C_BUS_ID,
                                          (uint8_t)BSP_MPU6050_DEV_ADDR,
                                          reg, 1,
                                          &val, 1,
                                          BSP_MPU6050_I2C_TIMEOUT_MS);
-    return map_i2c_err(ret);
+    return mpu6050_map_i2c_err(ret);
 }
 
 /** @brief 从 MPU6050 寄存器读取指定字节数 */
-static BSP_MPU6050_Status_t s_read_regs(uint8_t reg, uint8_t *buf, uint8_t len)
+static BSP_MPU6050_Status_t mpu6050_read_regs(uint8_t reg, uint8_t *buf, uint8_t len)
 {
     uint32_t ret = mpu6050_i2c_mem_read(MPU6050_I2C_BUS_ID,
                                         (uint8_t)BSP_MPU6050_DEV_ADDR,
                                         reg, 1,
                                         buf, len,
                                         BSP_MPU6050_I2C_TIMEOUT_MS);
-    return map_i2c_err(ret);
+    return mpu6050_map_i2c_err(ret);
 }
 
 /* ================================================================
@@ -139,7 +139,7 @@ static BSP_MPU6050_Status_t s_read_regs(uint8_t reg, uint8_t *buf, uint8_t len)
  *           [10:11] GYRO_YOUT_H/L
  *           [12:13] GYRO_ZOUT_H/L
  */
-static void s_parse_data(const uint8_t buf[], BSP_MPU6050_Data_t *p_data)
+static void mpu6050_parse_data(const uint8_t buf[], BSP_MPU6050_Data_t *p_data)
 {
     /* 加速度: 大端 → int16_t */
     p_data->accel_x = (int16_t)((buf[ 0] << 8) | buf[ 1]);
@@ -173,23 +173,23 @@ BSP_MPU6050_Status_t BSP_MPU6050_Init(void)
     BSP_SYSTICK_DelayMS(kPwrOnDelayMs);
 
     /* ---- 唤醒设备 (退出睡眠模式) ---- */
-    ret = s_write_reg(kRegPwrMgmt1, kValWakeUp);
+    ret = mpu6050_write_reg(kRegPwrMgmt1, kValWakeUp);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置采样率: 1kHz ---- */
-    ret = s_write_reg(kRegSmplrtDiv, kValSmplrtDiv);
+    ret = mpu6050_write_reg(kRegSmplrtDiv, kValSmplrtDiv);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置 DLPF: 5Hz 带宽 ---- */
-    ret = s_write_reg(kRegConfig, kValConfig);
+    ret = mpu6050_write_reg(kRegConfig, kValConfig);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置加速度计: ±4g ---- */
-    ret = s_write_reg(kRegAccelConfig, kValAccelConfig);
+    ret = mpu6050_write_reg(kRegAccelConfig, kValAccelConfig);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 配置陀螺仪: ±2000°/s ---- */
-    ret = s_write_reg(kRegGyroConfig, kValGyroConfig);
+    ret = mpu6050_write_reg(kRegGyroConfig, kValGyroConfig);
     if (ret != BSP_MPU6050_OK) return ret;
 
     /* ---- 等待 PLL 稳定 ---- */
@@ -198,7 +198,7 @@ BSP_MPU6050_Status_t BSP_MPU6050_Init(void)
     /* ---- WHO_AM_I 校验 ---- */
     {
         uint8_t who_am_i = 0;
-        ret = s_read_regs(kRegWhoAmI, &who_am_i, 1);
+        ret = mpu6050_read_regs(kRegWhoAmI, &who_am_i, 1);
         if (ret != BSP_MPU6050_OK) return ret;
 
         if (who_am_i != kWhoAmIExpected) {
@@ -214,10 +214,10 @@ BSP_MPU6050_Status_t BSP_MPU6050_ReadAll(BSP_MPU6050_Data_t *p_data)
     if (!p_data) return BSP_MPU6050_ERROR;
 
     uint8_t buf[kBurstLen];
-    BSP_MPU6050_Status_t ret = s_read_regs(kRegAccelXoutH, buf, kBurstLen);
+    BSP_MPU6050_Status_t ret = mpu6050_read_regs(kRegAccelXoutH, buf, kBurstLen);
     if (ret != BSP_MPU6050_OK) return ret;
 
-    s_parse_data(buf, p_data);
+    mpu6050_parse_data(buf, p_data);
 
     return BSP_MPU6050_OK;
 }
@@ -227,5 +227,5 @@ BSP_MPU6050_Status_t BSP_MPU6050_IsReady(void)
     uint32_t ret = mpu6050_i2c_ready(MPU6050_I2C_BUS_ID,
                                      (uint8_t)BSP_MPU6050_DEV_ADDR,
                                      3, 5);
-    return map_i2c_err(ret);
+    return mpu6050_map_i2c_err(ret);
 }

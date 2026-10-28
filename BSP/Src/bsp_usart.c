@@ -130,7 +130,7 @@ static USART_Ctx_t usart_ctx[BSP_USART_COUNT];
  * 内部辅助
  * ================================================================ */
 
-static uint32_t conv_word_length(BSP_USART_WordLength_t wl)
+static uint32_t usart_conv_word_length(BSP_USART_WordLength_t wl)
 {
     return (wl == BSP_USART_WORD_9B) ? UART_WORDLENGTH_9B : UART_WORDLENGTH_8B;
 }
@@ -140,14 +140,14 @@ static uint32_t conv_stop_bits(BSP_USART_StopBits_t sb)
     return (sb == BSP_USART_STOP_2) ? UART_STOPBITS_2 : UART_STOPBITS_1;
 }
 
-static uint32_t conv_parity(BSP_USART_Parity_t par)
+static uint32_t usart_conv_parity(BSP_USART_Parity_t par)
 {
     if (par == BSP_USART_PARITY_EVEN) return UART_PARITY_EVEN;
     if (par == BSP_USART_PARITY_ODD)  return UART_PARITY_ODD;
     return UART_PARITY_NONE;
 }
 
-static USART_Ctx_t *ctx_from_huart(UART_HandleTypeDef *huart)
+static USART_Ctx_t *usart_ctx_from_huart(UART_HandleTypeDef *huart)
 {
     for (int i = 0; i < BSP_USART_COUNT; i++)
         if (&usart_ctx[i].huart == huart) return &usart_ctx[i];
@@ -192,7 +192,7 @@ static inline void usart_crit_exit(uint32_t primask)
 }
 
 /** @brief 环形缓冲中已入队未发出的字节数 */
-static inline uint16_t tx_used(const USART_Ctx_t *ctx)
+static inline uint16_t usart_tx_used(const USART_Ctx_t *ctx)
 {
     return (uint16_t)(ctx->tx_head - ctx->tx_tail);
 }
@@ -203,11 +203,11 @@ static inline uint16_t tx_used(const USART_Ctx_t *ctx)
  *         只发送「从读指针到缓冲末尾」这一段连续数据 —— 跨末尾的部分
  *         留给下一次调用, 这样 DMA 永远不必处理回绕.
  */
-static void tx_kick(USART_Ctx_t *ctx)
+static void usart_tx_kick(USART_Ctx_t *ctx)
 {
     if (ctx->tx_active || !ctx->tx_buf) return;
 
-    uint16_t used = tx_used(ctx);
+    uint16_t used = usart_tx_used(ctx);
     if (used == 0) return;
 
     uint16_t idx    = (uint16_t)(ctx->tx_tail & ctx->tx_mask);
@@ -239,7 +239,7 @@ static void tx_kick(USART_Ctx_t *ctx)
  */
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
-    USART_Ctx_t *ctx = ctx_from_huart(huart);
+    USART_Ctx_t *ctx = usart_ctx_from_huart(huart);
     if (!ctx || Size == 0) return;
 
     uint8_t is_circ = (ctx->use_dma_rx
@@ -269,7 +269,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
 void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
 {
-    USART_Ctx_t *ctx = ctx_from_huart(huart);
+    USART_Ctx_t *ctx = usart_ctx_from_huart(huart);
     if (!ctx) return;
 
     /* 推进读指针 —— 只有 ISR 侧会改 tx_tail, 因此无需临界区 */
@@ -280,18 +280,18 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
     ctx->tx_active = 0;
 
     /* 还有积压就立刻续下一段 (DMA 分段续传的关键) */
-    tx_kick(ctx);
+    usart_tx_kick(ctx);
 
     /* 只有环形彻底排空才通知调用者
      * —— 语义是「总线空闲」而非「一段发完」, RS485 的 DE 方向控制依赖这一点 */
-    if (!ctx->tx_active && tx_used(ctx) == 0) {
+    if (!ctx->tx_active && usart_tx_used(ctx) == 0) {
         if (ctx->tx_cplt_cb) ctx->tx_cplt_cb();
     }
 }
 
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
 {
-    USART_Ctx_t *ctx = ctx_from_huart(huart);
+    USART_Ctx_t *ctx = usart_ctx_from_huart(huart);
     if (!ctx) return;
 
     /* TX 出错时 HAL 不会走 TxCplt, tx_active 会永久卡住导致该路再也发不出数据.
@@ -302,7 +302,7 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
         }
         ctx->tx_direct = 0;
         ctx->tx_active = 0;
-        tx_kick(ctx);
+        usart_tx_kick(ctx);
     }
 
     (void)HAL_UART_AbortReceive_IT(huart);
@@ -413,9 +413,9 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
     UART_HandleTypeDef *huart = &ctx->huart;
     huart->Instance          = hw->instance;
     huart->Init.BaudRate     = config->baudrate;
-    huart->Init.WordLength   = conv_word_length(config->word_length);
+    huart->Init.WordLength   = usart_conv_word_length(config->word_length);
     huart->Init.StopBits     = conv_stop_bits(config->stop_bits);
-    huart->Init.Parity       = conv_parity(config->parity);
+    huart->Init.Parity       = usart_conv_parity(config->parity);
     huart->Init.Mode         = UART_MODE_TX_RX;
     huart->Init.HwFlowCtl    = UART_HWCONTROL_NONE;
     huart->Init.OverSampling = UART_OVERSAMPLING_16;
@@ -509,7 +509,7 @@ uint16_t BSP_USART_Write(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
     uint32_t primask = usart_crit_enter();
 
     /* 剩余空间 = 总容量 − 已用量。多写者并发时靠临界区串行化 */
-    uint16_t space = (uint16_t)(ctx->tx_size - tx_used(ctx));
+    uint16_t space = (uint16_t)(ctx->tx_size - usart_tx_used(ctx));
     uint16_t n     = (len < space) ? len : space;
 
     if (n) {
@@ -524,7 +524,7 @@ uint16_t BSP_USART_Write(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
         }
         ctx->tx_head = (uint16_t)(ctx->tx_head + n);
 
-        tx_kick(ctx);
+        usart_tx_kick(ctx);
     }
 
     usart_crit_exit(primask);
@@ -543,7 +543,7 @@ uint16_t BSP_USART_TxSpace(BSP_USART_Id_t id)
     if (!ctx->initialized || !ctx->tx_buf) return 0;
 
     uint32_t primask = usart_crit_enter();
-    uint16_t space   = (uint16_t)(ctx->tx_size - tx_used(ctx));
+    uint16_t space   = (uint16_t)(ctx->tx_size - usart_tx_used(ctx));
     usart_crit_exit(primask);
     return space;
 }
@@ -553,7 +553,7 @@ uint16_t BSP_USART_TxPending(BSP_USART_Id_t id)
     if (id >= BSP_USART_COUNT) return 0;
     USART_Ctx_t *ctx = &usart_ctx[id];
     if (!ctx->initialized) return 0;
-    return tx_used(ctx);
+    return usart_tx_used(ctx);
 }
 
 uint8_t BSP_USART_TxIdle(BSP_USART_Id_t id)
@@ -561,7 +561,7 @@ uint8_t BSP_USART_TxIdle(BSP_USART_Id_t id)
     if (id >= BSP_USART_COUNT) return 1;
     USART_Ctx_t *ctx = &usart_ctx[id];
     if (!ctx->initialized) return 1;
-    return (uint8_t)(!ctx->tx_active && tx_used(ctx) == 0);
+    return (uint8_t)(!ctx->tx_active && usart_tx_used(ctx) == 0);
 }
 
 uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
@@ -575,7 +575,7 @@ uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t l
     uint16_t ret     = 0;
 
     /* 只在环形为空且发送空闲时启用 —— 否则会插队, 破坏发送顺序 */
-    if (!ctx->tx_active && tx_used(ctx) == 0) {
+    if (!ctx->tx_active && usart_tx_used(ctx) == 0) {
         ctx->tx_chunk  = len;
         ctx->tx_direct = 1;
         ctx->tx_active = 1;

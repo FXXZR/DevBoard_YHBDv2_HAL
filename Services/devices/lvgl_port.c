@@ -29,10 +29,10 @@ static lv_disp_drv_t *s_flush_drv;      /* 当前正在 DMA flush 的驱动 */
 /* ================================================================
  * 静态原型
  * ================================================================ */
-static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
+static void lvgl_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
                        lv_color_t *color_p);
-static void lcd_dma_done(void *arg);
-static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data);
+static void lvgl_lcd_dma_done(void *arg);
+static void lvgl_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data);
 
 /* ================================================================
  * 公开 API
@@ -57,7 +57,7 @@ void lvgl_port_init(void)
 
     s_disp_drv.hor_res  = 240;
     s_disp_drv.ver_res  = 320;
-    s_disp_drv.flush_cb = disp_flush;
+    s_disp_drv.flush_cb = lvgl_disp_flush;
     s_disp_drv.draw_buf = &draw_buf;
 
     lv_disp_drv_register(&s_disp_drv);
@@ -69,7 +69,7 @@ void lvgl_port_init(void)
     static lv_indev_drv_t indev_drv;
     lv_indev_drv_init(&indev_drv);
     indev_drv.type     = LV_INDEV_TYPE_POINTER;
-    indev_drv.read_cb  = touchpad_read;
+    indev_drv.read_cb  = lvgl_touchpad_read;
     lv_indev_drv_register(&indev_drv);
 }
 
@@ -77,7 +77,7 @@ void lvgl_port_init(void)
  * 静态函数 — 显示
  * ================================================================ */
 
-static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
+static void lvgl_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
                        lv_color_t *color_p)
 {
     uint16_t w = area->x2 - area->x1 + 1;
@@ -87,11 +87,11 @@ static void disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
      * (RGB565 与 LVGL 颜色深度一致, 零拷贝) */
     s_flush_drv = disp_drv;
     BSP_LCD_WritePixels_DMA(area->x1, area->y1, w, h,
-                            (const uint16_t *)color_p, lcd_dma_done, NULL);
+                            (const uint16_t *)color_p, lvgl_lcd_dma_done, NULL);
 }
 
 /* DMA 传输完成回调 (DMA2_Channel1_IRQHandler 中断上下文) */
-static void lcd_dma_done(void *arg)
+static void lvgl_lcd_dma_done(void *arg)
 {
     (void) arg;
     lv_disp_flush_ready(s_flush_drv);
@@ -101,7 +101,7 @@ static void lcd_dma_done(void *arg)
  * 静态函数 — 触摸
  * ================================================================ */
 
-static void touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
+static void lvgl_touchpad_read(lv_indev_drv_t *indev_drv, lv_indev_data_t *data)
 {
     (void) indev_drv;
 

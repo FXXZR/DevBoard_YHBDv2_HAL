@@ -58,7 +58,7 @@ static const uint32_t kPollLoopCycles  = 2000;     /* 轮询间隔 (~200us @72MH
 /**
  * @brief  将 I2C 层状态码映射为 EEPROM 层状态码 (保留 NACK/TIMEOUT 信息)
  */
-static BSP_EEPROM_Status_t map_i2c_err(uint32_t i2c_status)
+static BSP_EEPROM_Status_t eeprom_map_i2c_err(uint32_t i2c_status)
 {
     if (i2c_status == EEPROM_I2C_OK)      return BSP_EEPROM_OK;
     if (i2c_status == EEPROM_I2C_TIMEOUT) return BSP_EEPROM_ERR_TIMEOUT;
@@ -70,7 +70,7 @@ static BSP_EEPROM_Status_t map_i2c_err(uint32_t i2c_status)
  * 内部: 等待 EEPROM 写周期完成 (轮询设备地址 ACK)
  * ================================================================ */
 
-static void s_eeprom_wait_write_done(void)
+static void eeprom_wait_write_done(void)
 {
     for (uint32_t i = 0; i < kWriteWaitPolls; i++) {
         uint32_t ret = eeprom_i2c_ready(EEPROM_I2C_BUS_ID,
@@ -89,7 +89,7 @@ static void s_eeprom_wait_write_done(void)
  * 内部: 单页写入 (不处理边界, 调用者保证不跨页)
  * ================================================================ */
 
-static BSP_EEPROM_Status_t s_eeprom_page_write(const uint8_t *buf, uint8_t addr, uint8_t len)
+static BSP_EEPROM_Status_t eeprom_page_write(const uint8_t *buf, uint8_t addr, uint8_t len)
 {
     if (len == 0) return BSP_EEPROM_OK;
 
@@ -99,10 +99,10 @@ static BSP_EEPROM_Status_t s_eeprom_page_write(const uint8_t *buf, uint8_t addr,
                                         buf, len,
                                         BSP_EEPROM_I2C_TIMEOUT_MS);
     if (ret != EEPROM_I2C_OK) {
-        return map_i2c_err(ret);
+        return eeprom_map_i2c_err(ret);
     }
 
-    s_eeprom_wait_write_done();
+    eeprom_wait_write_done();
     return BSP_EEPROM_OK;
 }
 
@@ -125,7 +125,7 @@ BSP_EEPROM_Status_t BSP_EEPROM_Read(uint8_t *buf, uint8_t addr, uint16_t len)
                                        addr, 1,
                                        buf, len,
                                        BSP_EEPROM_I2C_TIMEOUT_MS);
-    return map_i2c_err(ret);
+    return eeprom_map_i2c_err(ret);
 }
 
 void BSP_EEPROM_Write(const uint8_t *buf, uint8_t addr, uint16_t len)
@@ -137,26 +137,26 @@ void BSP_EEPROM_Write(const uint8_t *buf, uint8_t addr, uint16_t len)
     uint16_t remaining   = len;
 
     if (remaining <= page_remain) {
-        s_eeprom_page_write(buf, addr, (uint8_t)remaining);
+        eeprom_page_write(buf, addr, (uint8_t)remaining);
         return;
     }
 
     if (page_remain > 0) {
-        s_eeprom_page_write(buf, addr, page_remain);
+        eeprom_page_write(buf, addr, page_remain);
         buf       += page_remain;
         addr      += (uint8_t)page_remain;
         remaining -= page_remain;
     }
 
     while (remaining >= BSP_EEPROM_PAGE_SIZE) {
-        s_eeprom_page_write(buf, addr, BSP_EEPROM_PAGE_SIZE);
+        eeprom_page_write(buf, addr, BSP_EEPROM_PAGE_SIZE);
         buf       += BSP_EEPROM_PAGE_SIZE;
         addr      += (uint8_t)BSP_EEPROM_PAGE_SIZE;
         remaining -= BSP_EEPROM_PAGE_SIZE;
     }
 
     if (remaining > 0) {
-        s_eeprom_page_write(buf, addr, (uint8_t)remaining);
+        eeprom_page_write(buf, addr, (uint8_t)remaining);
     }
 }
 
@@ -165,7 +165,7 @@ BSP_EEPROM_Status_t BSP_EEPROM_IsReady(void)
     uint32_t ret = eeprom_i2c_ready(EEPROM_I2C_BUS_ID,
                                     (uint8_t)BSP_EEPROM_DEV_ADDR,
                                     1, 2);
-    return map_i2c_err(ret);
+    return eeprom_map_i2c_err(ret);
 }
 
 void BSP_EEPROM_Erase(void)
@@ -175,6 +175,6 @@ void BSP_EEPROM_Erase(void)
     };
 
     for (uint16_t page = 0; page < BSP_EEPROM_CAPACITY; page += BSP_EEPROM_PAGE_SIZE) {
-        s_eeprom_page_write(erase_buf, (uint8_t)page, BSP_EEPROM_PAGE_SIZE);
+        eeprom_page_write(erase_buf, (uint8_t)page, BSP_EEPROM_PAGE_SIZE);
     }
 }

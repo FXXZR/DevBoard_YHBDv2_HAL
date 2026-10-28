@@ -69,7 +69,7 @@ static void i2c_init_gpio(const I2C_HW_Map_t *hw)
     HAL_GPIO_Init(hw->sda_port, &gpio);
 }
 
-static BSP_I2C_Status_t hal_to_i2c_status(HAL_StatusTypeDef s)
+static BSP_I2C_Status_t i2c_map_hal_status(HAL_StatusTypeDef s)
 {
     switch (s) {
     case HAL_OK:      return BSP_I2C_OK;
@@ -130,7 +130,7 @@ BSP_I2C_Status_t BSP_I2C_MemWrite(BSP_I2C_Bus_Id_t id,
         (mem_addr_size == 2) ? I2C_MEMADD_SIZE_16BIT : I2C_MEMADD_SIZE_8BIT,
         (uint8_t *)data, len, timeout);
 
-    return hal_to_i2c_status(s);
+    return i2c_map_hal_status(s);
 }
 
 BSP_I2C_Status_t BSP_I2C_MemRead(BSP_I2C_Bus_Id_t id,
@@ -148,7 +148,7 @@ BSP_I2C_Status_t BSP_I2C_MemRead(BSP_I2C_Bus_Id_t id,
         (mem_addr_size == 2) ? I2C_MEMADD_SIZE_16BIT : I2C_MEMADD_SIZE_8BIT,
         data, len, timeout);
 
-    return hal_to_i2c_status(s);
+    return i2c_map_hal_status(s);
 }
 
 BSP_I2C_Status_t BSP_I2C_IsDeviceReady(BSP_I2C_Bus_Id_t id,
@@ -162,5 +162,5 @@ BSP_I2C_Status_t BSP_I2C_IsDeviceReady(BSP_I2C_Bus_Id_t id,
         (uint16_t)(dev_addr << 1),
         trials, timeout);
 
-    return hal_to_i2c_status(s);
+    return i2c_map_hal_status(s);
 }

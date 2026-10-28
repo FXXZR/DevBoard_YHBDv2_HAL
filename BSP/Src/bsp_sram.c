@@ -118,7 +118,7 @@ static SRAM_Ctx_t sram_ctx;
  * @note   所有引脚配置完全相同, 逐引脚 HAL_GPIO_Init 即可.
  *         Init 在启动时只跑一次, 无需端口分组优化.
  */
-static void fsmc_init_all_gpio(void)
+static void sram_init_fsmc_gpio(void)
 {
     /* 使能所有 FSMC 相关 GPIO 时钟 */
     __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -151,7 +151,7 @@ void BSP_SRAM_Init(void)
     __HAL_RCC_FSMC_CLK_ENABLE();
 
     /* 2. 初始化所有 FSMC GPIO (AF_PP, 上拉, 高速) */
-    fsmc_init_all_gpio();
+    sram_init_fsmc_gpio();
 
     /* 3. HAL SRAM 配置 */
     FSMC_NORSRAM_TimingTypeDef timing = {0};

@@ -56,24 +56,24 @@ static const uint8_t kStatusBusy           = 0x01;
  * 内部辅助函数
  * ================================================================ */
 
-static inline uint8_t s_spi_byte(uint8_t data)
+static inline uint8_t spi_flash_byte(uint8_t data)
 {
     return BSP_SPI_Transfer(BSP_SPI_BUS_1, data, BSP_SPI_FLASH_TIMEOUT_STD);
 }
 
-static void s_flash_write_enable(void)
+static void spi_flash_write_enable(void)
 {
     FLASH_CS_LOW();
-    s_spi_byte(kCmdWriteEnable);
+    spi_flash_byte(kCmdWriteEnable);
     FLASH_CS_HIGH();
 }
 
-static uint8_t s_flash_read_status(void)
+static uint8_t spi_flash_read_status(void)
 {
     uint8_t status;
     FLASH_CS_LOW();
-    s_spi_byte(kCmdReadStatus1);
-    status = s_spi_byte(0xFF);
+    spi_flash_byte(kCmdReadStatus1);
+    status = spi_flash_byte(0xFF);
     FLASH_CS_HIGH();
     return status;
 }
@@ -83,11 +83,11 @@ static uint8_t s_flash_read_status(void)
  * @param  timeout_ms  超时 (ms)
  * @return BSP_SPI_FLASH_OK / BSP_SPI_FLASH_TIMEOUT
  */
-static BSP_SPI_FLASH_Status_t s_flash_wait_busy(uint32_t timeout_ms)
+static BSP_SPI_FLASH_Status_t spi_flash_wait_busy(uint32_t timeout_ms)
 {
     uint32_t elapsed_us = 0;
     uint32_t limit_us   = timeout_ms * 1000U;
-    while (s_flash_read_status() & kStatusBusy) {
+    while (spi_flash_read_status() & kStatusBusy) {
         if (elapsed_us >= limit_us) {
             return BSP_SPI_FLASH_TIMEOUT;
         }
@@ -101,7 +101,7 @@ static BSP_SPI_FLASH_Status_t s_flash_wait_busy(uint32_t timeout_ms)
  * @brief  单页写入 (≤256B, 不跨页)
  * @note   前端条件 (addr % 256 + len) ≤ 256 由断言强制, 见下。
  */
-static BSP_SPI_FLASH_Status_t s_flash_page_write(const uint8_t *buf, uint32_t addr, uint16_t len)
+static BSP_SPI_FLASH_Status_t spi_flash_page_write(const uint8_t *buf, uint32_t addr, uint16_t len)
 {
     if (len == 0) return BSP_SPI_FLASH_OK;
 
@@ -114,20 +114,20 @@ static BSP_SPI_FLASH_Status_t s_flash_page_write(const uint8_t *buf, uint32_t ad
     BSP_ASSERT((addr % BSP_SPI_FLASH_PAGE_SIZE) + (uint32_t)len
                <= (uint32_t)BSP_SPI_FLASH_PAGE_SIZE);
 
-    s_flash_write_enable();
+    spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdPageProgram);
-    s_spi_byte((uint8_t)((addr >> 16) & 0xFF));
-    s_spi_byte((uint8_t)((addr >> 8)  & 0xFF));
-    s_spi_byte((uint8_t)( addr        & 0xFF));
+    spi_flash_byte(kCmdPageProgram);
+    spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
+    spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
+    spi_flash_byte((uint8_t)( addr        & 0xFF));
 
     for (uint16_t i = 0; i < len; i++) {
-        s_spi_byte(buf[i]);
+        spi_flash_byte(buf[i]);
     }
     FLASH_CS_HIGH();
 
-    return s_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_PAGE);
+    return spi_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_PAGE);
 }
 
 /* ================================================================
@@ -160,10 +160,10 @@ uint32_t BSP_SPI_FLASH_ReadID(void)
     uint32_t id = 0;
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdJedecID);
-    id  = (uint32_t)s_spi_byte(0xFF) << 16;
-    id |= (uint32_t)s_spi_byte(0xFF) << 8;
-    id |= (uint32_t)s_spi_byte(0xFF);
+    spi_flash_byte(kCmdJedecID);
+    id  = (uint32_t)spi_flash_byte(0xFF) << 16;
+    id |= (uint32_t)spi_flash_byte(0xFF) << 8;
+    id |= (uint32_t)spi_flash_byte(0xFF);
     FLASH_CS_HIGH();
 
     return id;
@@ -179,13 +179,13 @@ void BSP_SPI_FLASH_Read(uint8_t *buf, uint32_t addr, uint32_t len)
     if (addr + len > BSP_SPI_FLASH_CAPACITY) return;
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdReadData);
-    s_spi_byte((uint8_t)((addr >> 16) & 0xFF));
-    s_spi_byte((uint8_t)((addr >> 8)  & 0xFF));
-    s_spi_byte((uint8_t)( addr        & 0xFF));
+    spi_flash_byte(kCmdReadData);
+    spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
+    spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
+    spi_flash_byte((uint8_t)( addr        & 0xFF));
 
     for (uint32_t i = 0; i < len; i++) {
-        buf[i] = s_spi_byte(0xFF);
+        buf[i] = spi_flash_byte(0xFF);
     }
     FLASH_CS_HIGH();
 }
@@ -203,11 +203,11 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_Write(const uint8_t *buf, uint32_t addr, ui
                           - (uint16_t)(addr % BSP_SPI_FLASH_PAGE_SIZE);
 
     if (remaining <= page_space) {
-        return s_flash_page_write(buf, addr, (uint16_t)remaining);
+        return spi_flash_page_write(buf, addr, (uint16_t)remaining);
     }
 
     if (page_space > 0) {
-        ret = s_flash_page_write(buf, addr, page_space);
+        ret = spi_flash_page_write(buf, addr, page_space);
         if (ret != BSP_SPI_FLASH_OK) return ret;
         buf       += page_space;
         addr      += page_space;
@@ -215,7 +215,7 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_Write(const uint8_t *buf, uint32_t addr, ui
     }
 
     while (remaining >= BSP_SPI_FLASH_PAGE_SIZE) {
-        ret = s_flash_page_write(buf, addr, BSP_SPI_FLASH_PAGE_SIZE);
+        ret = spi_flash_page_write(buf, addr, BSP_SPI_FLASH_PAGE_SIZE);
         if (ret != BSP_SPI_FLASH_OK) return ret;
         buf       += BSP_SPI_FLASH_PAGE_SIZE;
         addr      += BSP_SPI_FLASH_PAGE_SIZE;
@@ -223,7 +223,7 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_Write(const uint8_t *buf, uint32_t addr, ui
     }
 
     if (remaining > 0) {
-        return s_flash_page_write(buf, addr, (uint16_t)remaining);
+        return spi_flash_page_write(buf, addr, (uint16_t)remaining);
     }
 
     return BSP_SPI_FLASH_OK;
@@ -233,55 +233,55 @@ BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_SectorErase(uint32_t addr)
 {
     addr &= ~(BSP_SPI_FLASH_SECTOR_SIZE - 1U);
 
-    s_flash_write_enable();
+    spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdSectorErase);
-    s_spi_byte((uint8_t)((addr >> 16) & 0xFF));
-    s_spi_byte((uint8_t)((addr >> 8)  & 0xFF));
-    s_spi_byte((uint8_t)( addr        & 0xFF));
+    spi_flash_byte(kCmdSectorErase);
+    spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
+    spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
+    spi_flash_byte((uint8_t)( addr        & 0xFF));
     FLASH_CS_HIGH();
 
-    return s_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_SECTOR);
+    return spi_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_SECTOR);
 }
 
 BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_BlockErase(uint32_t addr)
 {
     addr &= ~(BSP_SPI_FLASH_BLOCK_SIZE - 1U);
 
-    s_flash_write_enable();
+    spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdBlockErase64K);
-    s_spi_byte((uint8_t)((addr >> 16) & 0xFF));
-    s_spi_byte((uint8_t)((addr >> 8)  & 0xFF));
-    s_spi_byte((uint8_t)( addr        & 0xFF));
+    spi_flash_byte(kCmdBlockErase64K);
+    spi_flash_byte((uint8_t)((addr >> 16) & 0xFF));
+    spi_flash_byte((uint8_t)((addr >> 8)  & 0xFF));
+    spi_flash_byte((uint8_t)( addr        & 0xFF));
     FLASH_CS_HIGH();
 
-    return s_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_BLOCK);
+    return spi_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_BLOCK);
 }
 
 BSP_SPI_FLASH_Status_t BSP_SPI_FLASH_ChipErase(void)
 {
-    s_flash_write_enable();
+    spi_flash_write_enable();
 
     FLASH_CS_LOW();
-    s_spi_byte(kCmdChipErase);
+    spi_flash_byte(kCmdChipErase);
     FLASH_CS_HIGH();
 
-    return s_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_CHIP);
+    return spi_flash_wait_busy(BSP_SPI_FLASH_TIMEOUT_CHIP);
 }
 
 void BSP_SPI_FLASH_PowerDown(void)
 {
     FLASH_CS_LOW();
-    s_spi_byte(kCmdPowerDown);
+    spi_flash_byte(kCmdPowerDown);
     FLASH_CS_HIGH();
 }
 
 void BSP_SPI_FLASH_Wakeup(void)
 {
     FLASH_CS_LOW();
-    s_spi_byte(kCmdReleasePowerDown);
+    spi_flash_byte(kCmdReleasePowerDown);
     FLASH_CS_HIGH();
 }

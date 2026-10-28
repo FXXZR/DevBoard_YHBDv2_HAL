@@ -70,37 +70,37 @@ static SoftI2C_Ctx_t soft_i2c_ctx[BSP_SOFT_I2C_BUS_COUNT];
  * 内部: GPIO 基础操作
  * ================================================================ */
 
-static inline void s_i2c_delay(const SoftI2C_Ctx_t *ctx)
+static inline void soft_i2c_delay(const SoftI2C_Ctx_t *ctx)
 {
     BSP_SYSTICK_DelayUS(ctx->half_period);
 }
 
-static inline void s_scl_h(const SoftI2C_Ctx_t *ctx)
+static inline void soft_i2c_scl_h(const SoftI2C_Ctx_t *ctx)
 {
     SCL_H(ctx->hw->scl_port, ctx->hw->scl_pin);
 }
 
-static inline void s_scl_l(const SoftI2C_Ctx_t *ctx)
+static inline void soft_i2c_scl_l(const SoftI2C_Ctx_t *ctx)
 {
     SCL_L(ctx->hw->scl_port, ctx->hw->scl_pin);
 }
 
-static inline void s_sda_h(const SoftI2C_Ctx_t *ctx)
+static inline void soft_i2c_sda_h(const SoftI2C_Ctx_t *ctx)
 {
     SDA_H(ctx->hw->sda_port, ctx->hw->sda_pin);
 }
 
-static inline void s_sda_l(const SoftI2C_Ctx_t *ctx)
+static inline void soft_i2c_sda_l(const SoftI2C_Ctx_t *ctx)
 {
     SDA_L(ctx->hw->sda_port, ctx->hw->sda_pin);
 }
 
-static inline uint8_t s_sda_read(const SoftI2C_Ctx_t *ctx)
+static inline uint8_t soft_i2c_sda_read(const SoftI2C_Ctx_t *ctx)
 {
     return SDA_R(ctx->hw->sda_port, ctx->hw->sda_pin);
 }
 
-static inline uint8_t s_scl_read(const SoftI2C_Ctx_t *ctx)
+static inline uint8_t soft_i2c_scl_read(const SoftI2C_Ctx_t *ctx)
 {
     return SCL_R(ctx->hw->scl_port, ctx->hw->scl_pin);
 }
@@ -114,10 +114,10 @@ static inline uint8_t s_scl_read(const SoftI2C_Ctx_t *ctx)
  * @return 0 = SCL 已变高, 1 = 超时 (总线卡死)
  * @note   P2 改进: 从设备可通过拉低 SCL 暂停传输。本函数检测此情况并加超时保护。
  */
-static uint8_t s_scl_wait_high(const SoftI2C_Ctx_t *ctx)
+static uint8_t soft_i2c_scl_wait_high(const SoftI2C_Ctx_t *ctx)
 {
     for (uint32_t to = 0; to < kSclCheckCycles; to++) {
-        if (s_scl_read(ctx)) return 0;
+        if (soft_i2c_scl_read(ctx)) return 0;
     }
     return 1;  /* 超时: SCL 被从设备或硬件故障长期拉低 */
 }
@@ -126,30 +126,30 @@ static uint8_t s_scl_wait_high(const SoftI2C_Ctx_t *ctx)
  * 内部: I2C 基本信号
  * ================================================================ */
 
-static void s_i2c_start(const SoftI2C_Ctx_t *ctx)
+static void soft_i2c_start(const SoftI2C_Ctx_t *ctx)
 {
-    s_sda_h(ctx);
-    s_scl_h(ctx);
-    s_i2c_delay(ctx);
-    s_sda_l(ctx);
-    s_i2c_delay(ctx);
-    s_scl_l(ctx);
-    s_i2c_delay(ctx);
+    soft_i2c_sda_h(ctx);
+    soft_i2c_scl_h(ctx);
+    soft_i2c_delay(ctx);
+    soft_i2c_sda_l(ctx);
+    soft_i2c_delay(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_delay(ctx);
 }
 
-static void s_i2c_stop(const SoftI2C_Ctx_t *ctx)
+static void soft_i2c_stop(const SoftI2C_Ctx_t *ctx)
 {
-    s_scl_l(ctx);
-    s_sda_l(ctx);
-    s_i2c_delay(ctx);
-    s_scl_h(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_sda_l(ctx);
+    soft_i2c_delay(ctx);
+    soft_i2c_scl_h(ctx);
     /* P2: 检查 SCL 是否成功变高 */
-    if (s_scl_wait_high(ctx)) {
+    if (soft_i2c_scl_wait_high(ctx)) {
         /* 超时 — 强制释放总线 */
     }
-    s_i2c_delay(ctx);
-    s_sda_h(ctx);
-    s_i2c_delay(ctx);
+    soft_i2c_delay(ctx);
+    soft_i2c_sda_h(ctx);
+    soft_i2c_delay(ctx);
 }
 
 /**
@@ -158,40 +158,40 @@ static void s_i2c_stop(const SoftI2C_Ctx_t *ctx)
  * @param  byte  待发送字节
  * @return 0 = ACK, 1 = NACK, 2 = 超时
  */
-static uint8_t s_i2c_write_byte(const SoftI2C_Ctx_t *ctx, uint8_t byte)
+static uint8_t soft_i2c_write_byte(const SoftI2C_Ctx_t *ctx, uint8_t byte)
 {
     for (int8_t i = 7; i >= 0; i--) {
-        s_scl_l(ctx);
-        s_i2c_delay(ctx);
+        soft_i2c_scl_l(ctx);
+        soft_i2c_delay(ctx);
         if (byte & (1U << i)) {
-            s_sda_h(ctx);
+            soft_i2c_sda_h(ctx);
         } else {
-            s_sda_l(ctx);
+            soft_i2c_sda_l(ctx);
         }
-        s_i2c_delay(ctx);
-        s_scl_h(ctx);
+        soft_i2c_delay(ctx);
+        soft_i2c_scl_h(ctx);
         /* P2: 检查 SCL 是否被拉伸 */
-        if (s_scl_wait_high(ctx)) return 2;
-        s_i2c_delay(ctx);
+        if (soft_i2c_scl_wait_high(ctx)) return 2;
+        soft_i2c_delay(ctx);
     }
 
     /* 释放 SDA, 读取 ACK */
-    s_scl_l(ctx);
-    s_sda_h(ctx);
-    s_i2c_delay(ctx);
-    s_scl_h(ctx);
-    if (s_scl_wait_high(ctx)) return 2;
-    s_i2c_delay(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_sda_h(ctx);
+    soft_i2c_delay(ctx);
+    soft_i2c_scl_h(ctx);
+    if (soft_i2c_scl_wait_high(ctx)) return 2;
+    soft_i2c_delay(ctx);
 
     /* 轮询 ACK 带超时 */
     uint8_t ack = 0;
     for (uint32_t to = 0; to < kAckTimeoutCycles; to++) {
-        ack = s_sda_read(ctx);
+        ack = soft_i2c_sda_read(ctx);
         if (ack == 0) break;  /* SDA 被从设备拉低 = ACK */
     }
 
-    s_scl_l(ctx);
-    s_i2c_delay(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_delay(ctx);
 
     return ack ? 1U : 0U;  /* 0=ACK, 1=NACK, 注意: 超时表现为 NACK+1 */
 }
@@ -200,34 +200,34 @@ static uint8_t s_i2c_write_byte(const SoftI2C_Ctx_t *ctx, uint8_t byte)
  * @brief  读取一个字节并发送 ACK/NACK
  * @param  send_ack  1 = 发送 ACK, 0 = 发送 NACK (最后一个字节)
  */
-static uint8_t s_i2c_read_byte(const SoftI2C_Ctx_t *ctx, uint8_t send_ack)
+static uint8_t soft_i2c_read_byte(const SoftI2C_Ctx_t *ctx, uint8_t send_ack)
 {
     uint8_t byte = 0;
 
-    s_scl_l(ctx);
-    s_sda_h(ctx);  /* 释放 SDA */
-    s_i2c_delay(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_sda_h(ctx);  /* 释放 SDA */
+    soft_i2c_delay(ctx);
 
     for (int8_t i = 7; i >= 0; i--) {
-        s_scl_h(ctx);
-        if (s_scl_wait_high(ctx)) break;  /* P2: 超时保护 */
-        s_i2c_delay(ctx);
-        if (s_sda_read(ctx)) {
+        soft_i2c_scl_h(ctx);
+        if (soft_i2c_scl_wait_high(ctx)) break;  /* P2: 超时保护 */
+        soft_i2c_delay(ctx);
+        if (soft_i2c_sda_read(ctx)) {
             byte |= (uint8_t)(1U << i);
         }
-        s_scl_l(ctx);
-        s_i2c_delay(ctx);
+        soft_i2c_scl_l(ctx);
+        soft_i2c_delay(ctx);
     }
 
     /* 发送 ACK/NACK */
-    if (send_ack) { s_sda_l(ctx); }
-    else          { s_sda_h(ctx); }
-    s_i2c_delay(ctx);
-    s_scl_h(ctx);
-    if (s_scl_wait_high(ctx)) { /* 超时 */ }
-    s_i2c_delay(ctx);
-    s_scl_l(ctx);
-    s_i2c_delay(ctx);
+    if (send_ack) { soft_i2c_sda_l(ctx); }
+    else          { soft_i2c_sda_h(ctx); }
+    soft_i2c_delay(ctx);
+    soft_i2c_scl_h(ctx);
+    if (soft_i2c_scl_wait_high(ctx)) { /* 超时 */ }
+    soft_i2c_delay(ctx);
+    soft_i2c_scl_l(ctx);
+    soft_i2c_delay(ctx);
 
     return byte;
 }
@@ -266,8 +266,8 @@ void BSP_SoftI2C_Init(BSP_SoftI2C_Bus_Id_t id, BSP_SoftI2C_Speed_t speed)
     HAL_GPIO_Init(sda, &gpio);
 
     /* 3. 初始电平: 总线空闲 */
-    s_scl_h(ctx);
-    s_sda_h(ctx);
+    soft_i2c_scl_h(ctx);
+    soft_i2c_sda_h(ctx);
 
     /* 4. 速度 → 半周期延时 */
     switch (speed) {
@@ -291,26 +291,26 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_MemWrite(BSP_SoftI2C_Bus_Id_t id,
     uint8_t ack;
 
     /* START + dev(W) */
-    s_i2c_start(ctx);
-    ack = s_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
-    if (ack == 1) { s_i2c_stop(ctx); return BSP_SOFT_I2C_NACK; }
-    if (ack == 2) { s_i2c_stop(ctx); return BSP_SOFT_I2C_TIMEOUT; }
+    soft_i2c_start(ctx);
+    ack = soft_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
+    if (ack == 1) { soft_i2c_stop(ctx); return BSP_SOFT_I2C_NACK; }
+    if (ack == 2) { soft_i2c_stop(ctx); return BSP_SOFT_I2C_TIMEOUT; }
 
     /* MemAddr */
     if (mem_addr_size == 2) {
-        ack = s_i2c_write_byte(ctx, (uint8_t)((mem_addr >> 8) & 0xFF));
-        if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+        ack = soft_i2c_write_byte(ctx, (uint8_t)((mem_addr >> 8) & 0xFF));
+        if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
     }
-    ack = s_i2c_write_byte(ctx, (uint8_t)(mem_addr & 0xFF));
-    if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+    ack = soft_i2c_write_byte(ctx, (uint8_t)(mem_addr & 0xFF));
+    if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
 
     /* Data */
     for (uint16_t i = 0; i < len; i++) {
-        ack = s_i2c_write_byte(ctx, data[i]);
-        if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+        ack = soft_i2c_write_byte(ctx, data[i]);
+        if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
     }
 
-    s_i2c_stop(ctx);
+    soft_i2c_stop(ctx);
     return BSP_SOFT_I2C_OK;
 }
 
@@ -328,28 +328,28 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_MemRead(BSP_SoftI2C_Bus_Id_t id,
     uint8_t ack;
 
     /* Phase 1: START + dev(W) + MemAddr */
-    s_i2c_start(ctx);
-    ack = s_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
-    if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+    soft_i2c_start(ctx);
+    ack = soft_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
+    if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
 
     if (mem_addr_size == 2) {
-        ack = s_i2c_write_byte(ctx, (uint8_t)((mem_addr >> 8) & 0xFF));
-        if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+        ack = soft_i2c_write_byte(ctx, (uint8_t)((mem_addr >> 8) & 0xFF));
+        if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
     }
-    ack = s_i2c_write_byte(ctx, (uint8_t)(mem_addr & 0xFF));
-    if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+    ack = soft_i2c_write_byte(ctx, (uint8_t)(mem_addr & 0xFF));
+    if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
 
     /* Phase 2: RESTART + dev(R) */
-    s_i2c_start(ctx);
-    ack = s_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) | 0x01));
-    if (ack) { s_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
+    soft_i2c_start(ctx);
+    ack = soft_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) | 0x01));
+    if (ack) { soft_i2c_stop(ctx); return (ack == 1) ? BSP_SOFT_I2C_NACK : BSP_SOFT_I2C_TIMEOUT; }
 
     /* Phase 3: Read data */
     for (uint16_t i = 0; i < len; i++) {
-        data[i] = s_i2c_read_byte(ctx, (i < len - 1) ? 1U : 0U);
+        data[i] = soft_i2c_read_byte(ctx, (i < len - 1) ? 1U : 0U);
     }
 
-    s_i2c_stop(ctx);
+    soft_i2c_stop(ctx);
     return BSP_SOFT_I2C_OK;
 }
 
@@ -363,9 +363,9 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_IsDeviceReady(BSP_SoftI2C_Bus_Id_t id,
     const SoftI2C_Ctx_t *ctx = &soft_i2c_ctx[id];
 
     for (uint32_t t = 0; t < trials; t++) {
-        s_i2c_start(ctx);
-        uint8_t ack = s_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
-        s_i2c_stop(ctx);
+        soft_i2c_start(ctx);
+        uint8_t ack = soft_i2c_write_byte(ctx, (uint8_t)((dev_addr << 1) & 0xFE));
+        soft_i2c_stop(ctx);
         if (ack == 0) return BSP_SOFT_I2C_OK;
         if (ack == 2) return BSP_SOFT_I2C_TIMEOUT;
     }

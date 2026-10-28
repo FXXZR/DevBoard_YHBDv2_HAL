@@ -44,7 +44,7 @@ static const struct {
 
 /* Sn_SR (socket 状态寄存器) 的取值 → 可读名字。
  * 这张表就是 W5500 的 TCP 状态机 —— 排查连接问题时看它比看代码快。 */
-static const char *s_state_str(uint8_t sr)
+static const char *sock_state_str(uint8_t sr)
 {
     switch (sr) {
     case SOCK_CLOSED:      return "CLOSED";
@@ -69,7 +69,7 @@ static const char *s_state_str(uint8_t sr)
 
 /* 命令发出后等芯片把 Sn_CR 清零 (表示命令已受理)。
  * 只占几个 SPI 时钟周期, 不设超时 —— 芯片不理采命令属于硬件故障。 */
-static void s_wait_cmd_done(uint8_t sn)
+static void sock_wait_cmd_done(uint8_t sn)
 {
     while (getSn_CR(sn)) { }
 }
@@ -82,7 +82,7 @@ static void s_wait_cmd_done(uint8_t sn)
  *        (拔网线/对端消失) 芯片要耗完 TCP 重传才回 CLOSED, 那段期间整个网络
  *        任务就卡死在这里。实测撞到过: 日志在"异常路径结束"那行之后停住。
  */
-static int s_wait_closed(uint8_t sn, uint32_t timeout_ms)
+static int sock_wait_closed(uint8_t sn, uint32_t timeout_ms)
 {
     TickType_t t0    = xTaskGetTickCount();
     TickType_t limit = pdMS_TO_TICKS(timeout_ms);
@@ -101,7 +101,7 @@ static int s_wait_closed(uint8_t sn, uint32_t timeout_ms)
  * @note  这一族状态下的 socket 必须【先发 FIN 再关】—— 见 W5500_Sock_Close。
  *        SYNSENT/SYNRECV 不在其中: 连接都还没建起来, 没有对端要通知。
  */
-static int s_is_connected_state(uint8_t sr)
+static int is_connected_state(uint8_t sr)
 {
     return sr == SOCK_ESTABLISHED || sr == SOCK_CLOSE_WAIT || sr == SOCK_FIN_WAIT
         || sr == SOCK_CLOSING || sr == SOCK_LAST_ACK;
@@ -113,16 +113,16 @@ static int s_is_connected_state(uint8_t sr)
  * @note  只在【变化时】打印: 轮询是每毫秒一次, 每次打印会把串口淹掉,
  *        而 Sn_SR 的价值恰恰在"哪几步走到了、卡在哪一步"。
  */
-static void s_trace_state(uint8_t sn, uint8_t sr, uint8_t *prev, uint32_t ms)
+static void sock_trace_state(uint8_t sn, uint8_t sr, uint8_t *prev, uint32_t ms)
 {
     if (*prev == sr) {
         return;
     }
     if (*prev == 0xFF) {
-        LOG_I("sn%d Sn_SR = %s", sn, s_state_str(sr));
+        LOG_I("sn%d Sn_SR = %s", sn, sock_state_str(sr));
     } else {
         LOG_I("sn%d Sn_SR %s -> %s (%u ms)",
-              sn, s_state_str(*prev), s_state_str(sr), (unsigned)ms);
+              sn, sock_state_str(*prev), sock_state_str(sr), (unsigned)ms);
     }
     *prev = sr;
 }
@@ -132,7 +132,7 @@ static void s_trace_state(uint8_t sn, uint8_t sr, uint8_t *prev, uint32_t ms)
  * @note   逐字段比, 【不】memcmp 整个结构体: 结构体里有填充字节, 而读回的那份
  *         是栈上未初始化的, 填充内容不确定 —— memcmp 会误报不一致。
  */
-static int netinfo_equal(const wiz_NetInfo *a, const wiz_NetInfo *b)
+static int sock_netinfo_equal(const wiz_NetInfo *a, const wiz_NetInfo *b)
 {
     return memcmp(a->mac, b->mac, sizeof(a->mac)) == 0
         && memcmp(a->ip,  b->ip,  sizeof(a->ip))  == 0
@@ -170,7 +170,7 @@ void W5500_Net_Apply(const wiz_NetInfo *cfg)
           back.gw[0], back.gw[1], back.gw[2], back.gw[3],
           back.dns[0], back.dns[1], back.dns[2], back.dns[3]);
 
-    if (!netinfo_equal(cfg, &back)) {
+    if (!sock_netinfo_equal(cfg, &back)) {
         LOG_W("netinfo 读回与写入不一致 —— SPI 帧有错时寄存器写入会被静默丢弃");
     }
 }
@@ -289,7 +289,7 @@ const char *W5500_Sock_StateStr(uint8_t sn)
     if (sn >= W5500_SOCK_COUNT) {
         return "?";
     }
-    return s_state_str(getSn_SR(sn));
+    return sock_state_str(getSn_SR(sn));
 }
 
 const char *W5500_Sock_StatusStr(W5500_Sock_Status_t st)
@@ -342,7 +342,7 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
     setSn_DPORTR(sn, port);
     setSn_DIPR(sn, (uint8_t *)ip);
     setSn_CR(sn, Sn_CR_CONNECT);
-    s_wait_cmd_done(sn);                /* CONNECT 命令被受理 → 芯片进 SYNSENT */
+    sock_wait_cmd_done(sn);                /* CONNECT 命令被受理 → 芯片进 SYNSENT */
 
     LOG_I("sn%d 连接 %u.%u.%u.%u:%u", sn, ip[0], ip[1], ip[2], ip[3], port);
 
@@ -355,7 +355,7 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
         TickType_t elapsed = xTaskGetTickCount() - t0;
 
         /* 状态一变就打 —— 握手卡在哪一步, 芯片自己写着 */
-        s_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
+        sock_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
 
         if (sr == SOCK_ESTABLISHED) {
             LOG_I("sn%d 握手完成, 用时 %u ms", sn, (unsigned)pdTICKS_TO_MS(elapsed));
@@ -375,7 +375,7 @@ W5500_Sock_Status_t W5500_Sock_Connect(uint8_t sn, const uint8_t ip[4],
         }
 
         if (elapsed >= limit) {
-            LOG_W("sn%d 连接超时 %u ms, 最后状态 %s", sn, timeout_ms, s_state_str(sr));
+            LOG_W("sn%d 连接超时 %u ms, 最后状态 %s", sn, timeout_ms, sock_state_str(sr));
             W5500_Sock_Close(sn);       /* 留着 SYNSENT 半死不活更难查 */
             return W5500_SOCK_ERR_TIMEOUT;
         }
@@ -426,7 +426,7 @@ W5500_Sock_Status_t W5500_Sock_WaitConnected(uint8_t sn, uint32_t timeout_ms)
 
         /* 服务端的状态轨迹: LISTEN → SYNRECV → ESTABLISHED —— 谁连上来的、
          * 卡在哪一步, 这里一目了然 */
-        s_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
+        sock_trace_state(sn, sr, &last, (uint32_t)pdTICKS_TO_MS(elapsed));
 
         if (sr == SOCK_ESTABLISHED) {
             LOG_I("sn%d 对端已连上 (%u ms)", sn, (unsigned)pdTICKS_TO_MS(elapsed));
@@ -439,7 +439,7 @@ W5500_Sock_Status_t W5500_Sock_WaitConnected(uint8_t sn, uint32_t timeout_ms)
 
         if (elapsed >= limit) {
             LOG_W("sn%d 等连接超时 %u ms, 最后状态 %s",
-                  sn, timeout_ms, s_state_str(sr));
+                  sn, timeout_ms, sock_state_str(sr));
             return W5500_SOCK_ERR_TIMEOUT;
         }
         vTaskDelay(1);
@@ -561,13 +561,13 @@ void W5500_Sock_Close(uint8_t sn)
     sr = getSn_SR(sn);
 
     /* ★ 已连接时走正常挥手 DISCON —— 这是【发 FIN 告诉对端】的那条路 */
-    if (s_is_connected_state(sr)) {
+    if (is_connected_state(sr)) {
         setSn_CR(sn, Sn_CR_DISCON);
-        s_wait_cmd_done(sn);
+        sock_wait_cmd_done(sn);
 
         /* ★ 自己带期限等, 等不到就【强制关闭】: 不能直接调 close(), 它内部是
          *   无超时忙等, 对端不可达时网络任务整个卡死 (见本地疑难问题记录 006)。 */
-        if (s_wait_closed(sn, close_timeout.close_ms)) {
+        if (sock_wait_closed(sn, close_timeout.close_ms)) {
             close(sn);
             return;
         }
@@ -575,11 +575,11 @@ void W5500_Sock_Close(uint8_t sn)
         /* ★★ 重读一次状态再决定 —— 这两秒里芯片可能【自己】把连接建起来了
          *    (对端的 SYN-ACK 只是来晚了), 见本地疑难问题记录 007。 */
         sr = getSn_SR(sn);
-        if (s_is_connected_state(sr)) {
-            LOG_W("sn%d 超时放弃时芯片已进 %s, 先发 FIN 通知对端", sn, s_state_str(sr));
+        if (is_connected_state(sr)) {
+            LOG_W("sn%d 超时放弃时芯片已进 %s, 先发 FIN 通知对端", sn, sock_state_str(sr));
             setSn_CR(sn, Sn_CR_DISCON);
-            s_wait_cmd_done(sn);
-            if (s_wait_closed(sn, close_timeout.fin_wait_ms)) {
+            sock_wait_cmd_done(sn);
+            if (sock_wait_closed(sn, close_timeout.fin_wait_ms)) {
                 close(sn);
                 return;
             }
@@ -597,10 +597,10 @@ void W5500_Sock_Close(uint8_t sn)
      * 两者都该直接强关: Sn_CR_CLOSE 是"立即关", 不等对端回应。 */
     if (getSn_SR(sn) != SOCK_CLOSED) {
         setSn_CR(sn, Sn_CR_CLOSE);
-        s_wait_cmd_done(sn);
+        sock_wait_cmd_done(sn);
         /* 兜底再等一下; 仍未 CLOSED 说明是芯片级故障, 下面 close() 会阻塞,
          * 那就该由断言通道响了 —— 但那是硬件坏了, 与本处逻辑无关 */
-        (void)s_wait_closed(sn, close_timeout.force_wait_ms);
+        (void)sock_wait_closed(sn, close_timeout.force_wait_ms);
     }
 
     /* 此时 Sn_SR 已是 CLOSED, close() 内部第一轮就返回; 它的作用是

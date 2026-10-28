@@ -63,11 +63,11 @@ static SDCard_Ctx_t s_ctx[BSP_SDCARD_BUS_COUNT];
 /* ================================================================
  * 内部辅助函数声明
  * ================================================================ */
-static void              s_dma_config_rx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw);
-static void              s_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw);
-static BSP_SDCARD_Status_t s_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_ms);
-static BSP_SDCARD_Status_t s_read_sector(SDCard_Ctx_t *ctx, uint8_t *buf, uint32_t sector);
-static BSP_SDCARD_Status_t s_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf, uint32_t sector);
+static void              sdcard_dma_config_rx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw);
+static void              sdcard_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw);
+static BSP_SDCARD_Status_t sdcard_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_ms);
+static BSP_SDCARD_Status_t sdcard_read_sector(SDCard_Ctx_t *ctx, uint8_t *buf, uint32_t sector);
+static BSP_SDCARD_Status_t sdcard_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf, uint32_t sector);
 
 /* ================================================================
  * HAL 回调 — 供 ISR 调用
@@ -173,7 +173,7 @@ void HAL_SD_MspInit(SD_HandleTypeDef *hsd)
     gpio.Pin = GPIO_PIN_2;
     HAL_GPIO_Init(GPIOD, &gpio);
 
-    /* 3. NVIC 配置 (DMA 配置由 s_dma_config_rx/tx 按需进行) */
+    /* 3. NVIC 配置 (DMA 配置由 sdcard_dma_config_rx/tx 按需进行) */
     /*    此处仅设置中断优先级并使能 */
     HAL_NVIC_SetPriority(DMA2_Channel4_5_IRQn, 0x0D, 0);
     HAL_NVIC_EnableIRQ(DMA2_Channel4_5_IRQn);
@@ -205,7 +205,7 @@ void HAL_SD_MspDeInit(SD_HandleTypeDef *hsd)
 /**
  * @brief  配置 DMA2_Channel4 为 RX 方向 (Periph → Memory)
  */
-static void s_dma_config_rx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
+static void sdcard_dma_config_rx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
 {
     /* 先断开旧的 DMA 链接, 中止并反初始化 */
     if (ctx->hsd.hdmarx != NULL) {
@@ -231,7 +231,7 @@ static void s_dma_config_rx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
 /**
  * @brief  配置 DMA2_Channel4 为 TX 方向 (Memory → Periph)
  */
-static void s_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
+static void sdcard_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
 {
     if (ctx->hsd.hdmatx != NULL) {
         HAL_DMA_Abort(ctx->hsd.hdmatx);
@@ -256,7 +256,7 @@ static void s_dma_config_tx(SDCard_Ctx_t *ctx, const SDCard_HW_Map_t *hw)
 /**
  * @brief  等待 DMA 传输完成 (轮询 transfer_done 标志)
  */
-static BSP_SDCARD_Status_t s_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_ms)
+static BSP_SDCARD_Status_t sdcard_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_ms)
 {
     uint32_t elapsed = 0;
 
@@ -282,17 +282,17 @@ static BSP_SDCARD_Status_t s_wait_transfer(SDCard_Ctx_t *ctx, uint32_t timeout_m
  * @note   对 SDSC (BlockSize > 512) 使用 bounce buffer 避免 HAL 多读溢出
  *         对 SDHC (BlockSize = 512) 直接使用 DMA
  */
-static BSP_SDCARD_Status_t s_read_sector(SDCard_Ctx_t *ctx, uint8_t *buf, uint32_t sector)
+static BSP_SDCARD_Status_t sdcard_read_sector(SDCard_Ctx_t *ctx, uint8_t *buf, uint32_t sector)
 {
     uint32_t block_size = ctx->info.block_size;
 
     if (block_size == 512) {
         /* SDHC: LBA = block address, 1 block = 512 bytes → 直接 DMA */
-        s_dma_config_rx(ctx, &hw_map[0]);
+        sdcard_dma_config_rx(ctx, &hw_map[0]);
         if (HAL_SD_ReadBlocks_DMA(&ctx->hsd, buf, sector, 1) != HAL_OK) {
             return BSP_SDCARD_ERROR;
         }
-        return s_wait_transfer(ctx, BSP_SDCARD_TIMEOUT_READ);
+        return sdcard_wait_transfer(ctx, BSP_SDCARD_TIMEOUT_READ);
     }
 
     /* SDSC: 强制 512-byte 块传输 — 临时设 BlockSize=512 触发 HAL
@@ -309,17 +309,17 @@ static BSP_SDCARD_Status_t s_read_sector(SDCard_Ctx_t *ctx, uint8_t *buf, uint32
 /**
  * @brief  写入单个 512 字节逻辑扇区
  */
-static BSP_SDCARD_Status_t s_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf, uint32_t sector)
+static BSP_SDCARD_Status_t sdcard_write_sector(SDCard_Ctx_t *ctx, const uint8_t *buf, uint32_t sector)
 {
     uint32_t block_size = ctx->info.block_size;
 
     if (block_size == 512) {
         /* SDHC: 直接 DMA 写 */
-        s_dma_config_tx(ctx, &hw_map[0]);
+        sdcard_dma_config_tx(ctx, &hw_map[0]);
         if (HAL_SD_WriteBlocks_DMA(&ctx->hsd, (uint8_t *)buf, sector, 1) != HAL_OK) {
             return BSP_SDCARD_ERROR;
         }
-        return s_wait_transfer(ctx, BSP_SDCARD_TIMEOUT_WRITE);
+        return sdcard_wait_transfer(ctx, BSP_SDCARD_TIMEOUT_WRITE);
     }
 
     /* SDSC: 强制 512-byte 块传输 — CMD16(SET_BLOCKLEN=512) + polling 写. */
@@ -435,9 +435,9 @@ BSP_SDCARD_Status_t BSP_SDCARD_Read(BSP_SDCARD_Bus_Id_t id, uint8_t *buf,
     SDCard_Ctx_t *ctx = &s_ctx[id];
     if (!ctx->initialized) return BSP_SDCARD_ERROR;
 
-    /* 逐扇区读取 (s_read_sector 内部处理 SDSC bounce / SDHC DMA) */
+    /* 逐扇区读取 (sdcard_read_sector 内部处理 SDSC bounce / SDHC DMA) */
     for (uint32_t i = 0; i < num_sectors; i++) {
-        BSP_SDCARD_Status_t st = s_read_sector(ctx, buf + i * 512, sector_addr + i);
+        BSP_SDCARD_Status_t st = sdcard_read_sector(ctx, buf + i * 512, sector_addr + i);
         if (st != BSP_SDCARD_OK) return st;
     }
     return BSP_SDCARD_OK;
@@ -456,7 +456,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_Write(BSP_SDCARD_Bus_Id_t id, const uint8_t *buf,
 
     /* 逐扇区写入 */
     for (uint32_t i = 0; i < num_sectors; i++) {
-        BSP_SDCARD_Status_t st = s_write_sector(ctx, buf + i * 512, sector_addr + i);
+        BSP_SDCARD_Status_t st = sdcard_write_sector(ctx, buf + i * 512, sector_addr + i);
         if (st != BSP_SDCARD_OK) return st;
     }
     return BSP_SDCARD_OK;

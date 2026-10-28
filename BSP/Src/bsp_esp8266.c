@@ -16,7 +16,7 @@
 #include <string.h>
 
 /* 本地延时封装 — static inline 零开销, 换平台只需改此两行 */
-static inline void delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
+static inline void esp8266_delay_ms(uint32_t ms) { BSP_SYSTICK_DelayMS(ms); }
 
 /* ================================================================
  * 硬件映射
@@ -98,7 +98,7 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
     gpio.Pull = GPIO_NOPULL;
     HAL_GPIO_Init(WIFI_RST_PORT, &gpio);
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_RESET);
-    delay_ms(5);  /* 确保模块上电稳定 */
+    esp8266_delay_ms(5);  /* 确保模块上电稳定 */
 
     /* ---- USART3 (此时 ESP8266 在复位中, TX 线任何毛刺都不会被接收) ---- */
     BSP_USART_Config_t usart_cfg = {
@@ -115,7 +115,7 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
 
     /* ---- 释放复位: TX 线已稳定为高, ESP8266 正常启动 ---- */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_SET);
-    delay_ms(reset_boot_ms);  /* 等待模块固件启动 */
+    esp8266_delay_ms(reset_boot_ms);  /* 等待模块固件启动 */
 
     /* 清空启动期间 ESP8266 可能发出的数据 (boot ROM 74880baud 噪声等) */
     BSP_USART_FlushRx(ESP8266_USART_ID);
@@ -172,16 +172,16 @@ void BSP_ESP8266_Reset(void)
     /* 确保模块已使能 */
     if (!esp8266_enabled) {
         BSP_ESP8266_Enable();
-        delay_ms(10);
+        esp8266_delay_ms(10);
     }
 
     /* 拉低 RST ≥100μs, 用 10ms 保证足够裕量 */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_RESET);
-    delay_ms(reset_low_ms);
+    esp8266_delay_ms(reset_low_ms);
 
     /* 拉高 RST, 等待模块启动 */
     HAL_GPIO_WritePin(WIFI_RST_PORT, WIFI_RST_PIN, GPIO_PIN_SET);
-    delay_ms(reset_boot_ms);
+    esp8266_delay_ms(reset_boot_ms);
 
     /* 清空 USART3 接收缓冲 (复位期间可能产生乱码) */
     BSP_ESP8266_FlushRx();

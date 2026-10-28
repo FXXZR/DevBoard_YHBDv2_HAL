@@ -86,7 +86,7 @@ static BSP_AP3216C_AlsRange_t s_als_range = BSP_AP3216C_ALS_RANGE_20661;
  * 内部: 错误码映射
  * ================================================================ */
 
-static BSP_AP3216C_Status_t map_i2c_err(uint32_t i2c_status)
+static BSP_AP3216C_Status_t ap3216c_map_i2c_err(uint32_t i2c_status)
 {
     if (i2c_status == AP3216C_I2C_OK)      return BSP_AP3216C_OK;
     if (i2c_status == AP3216C_I2C_TIMEOUT) return BSP_AP3216C_ERR_TIMEOUT;
@@ -98,36 +98,36 @@ static BSP_AP3216C_Status_t map_i2c_err(uint32_t i2c_status)
  * 内部: I2C 读写封装
  * ================================================================ */
 
-static BSP_AP3216C_Status_t s_write_reg(uint8_t reg, uint8_t val)
+static BSP_AP3216C_Status_t ap3216c_write_reg(uint8_t reg, uint8_t val)
 {
     uint32_t ret = ap3216c_i2c_mem_write(AP3216C_I2C_BUS_ID,
                                          (uint8_t)BSP_AP3216C_DEV_ADDR,
                                          reg, 1, &val, 1,
                                          BSP_AP3216C_I2C_TIMEOUT_MS);
-    return map_i2c_err(ret);
+    return ap3216c_map_i2c_err(ret);
 }
 
-static BSP_AP3216C_Status_t s_read_regs(uint8_t reg, uint8_t *buf, uint8_t len)
+static BSP_AP3216C_Status_t ap3216c_read_regs(uint8_t reg, uint8_t *buf, uint8_t len)
 {
     uint32_t ret = ap3216c_i2c_mem_read(AP3216C_I2C_BUS_ID,
                                         (uint8_t)BSP_AP3216C_DEV_ADDR,
                                         reg, 1, buf, len,
                                         BSP_AP3216C_I2C_TIMEOUT_MS);
-    return map_i2c_err(ret);
+    return ap3216c_map_i2c_err(ret);
 }
 
 /* ================================================================
  * 内部: 单寄存器低字节+高字节读取 (对齐官方 read_low_and_high)
  * ================================================================ */
 
-static BSP_AP3216C_Status_t s_read_two_regs(uint8_t reg_low, uint32_t *out)
+static BSP_AP3216C_Status_t ap3216c_read_two_regs(uint8_t reg_low, uint32_t *out)
 {
     uint8_t low, high;
 
-    BSP_AP3216C_Status_t ret = s_read_regs(reg_low, &low, 1);
+    BSP_AP3216C_Status_t ret = ap3216c_read_regs(reg_low, &low, 1);
     if (ret != BSP_AP3216C_OK) return ret;
 
-    ret = s_read_regs(reg_low + 1, &high, 1);
+    ret = ap3216c_read_regs(reg_low + 1, &high, 1);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *out = (uint32_t)low | ((uint32_t)high << 8);
@@ -148,7 +148,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_Init(BSP_AP3216C_AlsRange_t range)
     ap3216c_i2c_init(AP3216C_I2C_BUS_ID, kI2cSpeed);
 
     /* ---- 软件复位 ---- */
-    ret = s_write_reg(kRegSysConfig, kValSwReset);
+    ret = ap3216c_write_reg(kRegSysConfig, kValSwReset);
     if (ret != BSP_AP3216C_OK) return ret;
 
     BSP_SYSTICK_DelayMS(kResetDelayMs);
@@ -156,16 +156,16 @@ BSP_AP3216C_Status_t BSP_AP3216C_Init(BSP_AP3216C_AlsRange_t range)
     /* ---- ALS 量程配置 (RMW, 对齐官方 ap3216c_set_param) ---- */
     if (range != BSP_AP3216C_ALS_RANGE_20661) {
         uint8_t val;
-        ret = s_read_regs(kRegAlsConfig, &val, 1);
+        ret = ap3216c_read_regs(kRegAlsConfig, &val, 1);
         if (ret != BSP_AP3216C_OK) return ret;
         val &= 0xCF;
         val |= (uint8_t)(range << 4);
-        ret = s_write_reg(kRegAlsConfig, val);
+        ret = ap3216c_write_reg(kRegAlsConfig, val);
         if (ret != BSP_AP3216C_OK) return ret;
     }
 
     /* ---- 设置 ALS + PS 同时工作模式 ---- */
-    ret = s_write_reg(kRegSysConfig, kValAlsPsActive);
+    ret = ap3216c_write_reg(kRegSysConfig, kValAlsPsActive);
     if (ret != BSP_AP3216C_OK) return ret;
 
     BSP_SYSTICK_DelayMS(kModeSetDelayMs);
@@ -188,16 +188,16 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadAll(BSP_AP3216C_Data_t *p_data)
     /* ---- 1. 读中断状态 (官方先读此寄存器) ---- */
     {
         uint8_t dummy = 0;
-        (void)s_read_regs(kRegIntStatus, &dummy, 1);
+        (void)ap3216c_read_regs(kRegIntStatus, &dummy, 1);
     }
 
     /* ---- 2. ALS: 低字节 + 高字节 (对齐官方 read_low_and_high) ---- */
-    ret = s_read_two_regs(kRegAlsDataLow, &raw);
+    ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
     p_data->als_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_als_range];
 
     /* ---- 3. PS: 低字节 + 高字节 ---- */
-    ret = s_read_two_regs(kRegPsDataLow, &raw);
+    ret = ap3216c_read_two_regs(kRegPsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     /* IR 饱和检查 (对齐官方: bit6 or bit14) */
@@ -206,7 +206,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadAll(BSP_AP3216C_Data_t *p_data)
     p_data->approaching  = (raw & 0x8000) ? 1 : 0;
 
     /* ---- 4. IR: 低字节 + 高字节 ---- */
-    ret = s_read_two_regs(kRegIrDataLow, &raw);
+    ret = ap3216c_read_two_regs(kRegIrDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
     p_data->ir = ((raw & 0x0003) + ((raw >> 8) & 0xFF)) & 0x03FF;
 
@@ -222,7 +222,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadALS(float *p_lux)
     if (!p_lux) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = s_read_two_regs(kRegAlsDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *p_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_als_range];
@@ -234,7 +234,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadPS(uint16_t *p_ps)
     if (!p_ps) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = s_read_two_regs(kRegPsDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegPsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *p_ps = ((raw & 0x000F) + (((raw >> 8) & 0x3F) << 4)) & 0x03FF;
@@ -246,7 +246,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadIR(uint16_t *p_ir)
     if (!p_ir) return BSP_AP3216C_ERROR;
 
     uint32_t raw;
-    BSP_AP3216C_Status_t ret = s_read_two_regs(kRegIrDataLow, &raw);
+    BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegIrDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
     *p_ir = ((raw & 0x0003) + ((raw >> 8) & 0xFF)) & 0x03FF;

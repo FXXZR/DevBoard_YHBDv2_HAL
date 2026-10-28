@@ -17,7 +17,7 @@
 #include "task.h"
 
 /* 按钮点击事件回调 */
-static void btn_event_cb(lv_event_t *e)
+static void disp_btn_event_cb(lv_event_t *e)
 {
     lv_obj_t *label = (lv_obj_t *)lv_event_get_user_data(e);
     lv_label_set_text(label, "Touch OK!");
@@ -52,7 +52,7 @@ void vDispTask(void *pvParameters)
     lv_obj_t *btn = lv_btn_create(lv_scr_act());
     lv_obj_set_pos(btn, 80, 200);
     lv_obj_set_size(btn, 80, 40);
-    lv_obj_add_event_cb(btn, btn_event_cb, LV_EVENT_CLICKED, label);
+    lv_obj_add_event_cb(btn, disp_btn_event_cb, LV_EVENT_CLICKED, label);
 
     /* 5. LVGL 心跳 — 处理绘制/动画/事件 */
     for (;;) {
