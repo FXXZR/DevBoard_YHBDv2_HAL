@@ -52,12 +52,12 @@ volatile uint8_t BSP_XPT2046_TouchFlag = 0;
 volatile BSP_XPT2046_Coordinate_t BSP_XPT2046_TouchPoint = {0};
 
 /* 校准系数 (运行时更新) */
-static BSP_XPT2046_TouchPara_t touch_para = {
+static BSP_XPT2046_TouchPara_t s_xpt_touch_para = {
     0.085958, -0.001073, -4.979353,
     -0.001750, 0.065168, -13.318824
 };
 
-static uint8_t xpt_initialized = 0;
+static uint8_t s_xpt_initialized = 0;
 
 /* ================================================================
  * 软件 SPI 底层
@@ -351,7 +351,7 @@ uint8_t BSP_XPT2046_TouchCalibrate(void)
     }
 
     /* 保存校准系数 */
-    touch_para = new_para;
+    s_xpt_touch_para = new_para;
 
     BSP_LCD_Clear(BSP_LCD_COLOR_BLACK);
     BSP_LCD_DrawString((sw - strlen("Calibrate OK") * 8) >> 1, sh >> 1,
@@ -376,8 +376,8 @@ fail:
 
 void BSP_XPT2046_Init(void)
 {
-    if (xpt_initialized) return;
-    xpt_initialized = 1;
+    if (s_xpt_initialized) return;
+    s_xpt_initialized = 1;
 
     xpt_init_gpio_spi();
     xpt_init_exti();
@@ -388,7 +388,7 @@ uint8_t BSP_XPT2046_GetTouchPoint(BSP_XPT2046_Coordinate_t *pCoord,
 {
     BSP_XPT2046_Coordinate_t sample;
 
-    if (!pPara) pPara = &touch_para;
+    if (!pPara) pPara = &s_xpt_touch_para;
 
     if (xpt_read_adc_smooth_xy(&sample)) {
         pCoord->x = (uint16_t)(pPara->dX_X * sample.x + pPara->dX_Y * sample.y + pPara->dX);

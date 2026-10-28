@@ -96,7 +96,13 @@ typedef struct {
     uint16_t           y_length;             /* 当前 Y 方向像素数 */
 } LCD_Ctx_t;
 
-static LCD_Ctx_t lcd_ctx;
+static struct {
+    LCD_Ctx_t         ctx;
+    DMA_HandleTypeDef dma;
+    void            (*dma_done_cb)(void *arg);
+    void             *dma_done_arg;
+    volatile uint8_t  dma_busy;     /* 软件完成标志 (中断回调清 0) */
+} s_lcd_ctx;
 
 /* DMA 刷屏初始化 (实现在文件后部) */
 static void lcd_init_dma(void);
@@ -217,25 +223,25 @@ static void lcd_init_fsmc(void)
     rtiming.DataLatency           = 0x02;
     rtiming.AccessMode            = FSMC_ACCESS_MODE_D;
 
-    lcd_ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
-    lcd_ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
-    lcd_ctx.handle.Init.NSBank            = FSMC_NORSRAM_BANK4;
-    lcd_ctx.handle.Init.DataAddressMux    = FSMC_DATA_ADDRESS_MUX_DISABLE;
-    lcd_ctx.handle.Init.MemoryType        = FSMC_MEMORY_TYPE_NOR;
-    lcd_ctx.handle.Init.MemoryDataWidth   = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
-    lcd_ctx.handle.Init.BurstAccessMode   = FSMC_BURST_ACCESS_MODE_DISABLE;
-    lcd_ctx.handle.Init.WaitSignalPolarity= FSMC_WAIT_SIGNAL_POLARITY_LOW;
-    lcd_ctx.handle.Init.WrapMode          = FSMC_WRAP_MODE_DISABLE;
-    lcd_ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
-    lcd_ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
-    lcd_ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
-    lcd_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_ENABLE;
-    lcd_ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
-    lcd_ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
-    lcd_ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
+    s_lcd_ctx.ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
+    s_lcd_ctx.ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
+    s_lcd_ctx.ctx.handle.Init.NSBank            = FSMC_NORSRAM_BANK4;
+    s_lcd_ctx.ctx.handle.Init.DataAddressMux    = FSMC_DATA_ADDRESS_MUX_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.MemoryType        = FSMC_MEMORY_TYPE_NOR;
+    s_lcd_ctx.ctx.handle.Init.MemoryDataWidth   = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
+    s_lcd_ctx.ctx.handle.Init.BurstAccessMode   = FSMC_BURST_ACCESS_MODE_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.WaitSignalPolarity= FSMC_WAIT_SIGNAL_POLARITY_LOW;
+    s_lcd_ctx.ctx.handle.Init.WrapMode          = FSMC_WRAP_MODE_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
+    s_lcd_ctx.ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
+    s_lcd_ctx.ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_ENABLE;
+    s_lcd_ctx.ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
+    s_lcd_ctx.ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
 
     /* Timing → BTR (写); rtiming → BWTR (读, 此前与写共用, 从未真正生效) */
-    HAL_SRAM_Init(&lcd_ctx.handle, &timing, &rtiming);
+    HAL_SRAM_Init(&s_lcd_ctx.ctx.handle, &timing, &rtiming);
 }
 
 /* ================================================================
@@ -470,8 +476,8 @@ static void lcd_set_cursor(uint16_t x, uint16_t y)
 
 void BSP_LCD_Init(void)
 {
-    if (lcd_ctx.initialized) return;
-    lcd_ctx.initialized = 1;
+    if (s_lcd_ctx.ctx.initialized) return;
+    s_lcd_ctx.ctx.initialized = 1;
 
     /* 1. 使能 FSMC 时钟 */
     __HAL_RCC_FSMC_CLK_ENABLE();
@@ -489,11 +495,11 @@ void BSP_LCD_Init(void)
     lcd_hw_reset();
 
     /* 6. 读取 ID 并加载寄存器序列 */
-    lcd_ctx.id = BSP_LCD_ReadID();
+    s_lcd_ctx.ctx.id = BSP_LCD_ReadID();
 
-    if (lcd_ctx.id == BSP_LCD_ID_ILI9341) {
+    if (s_lcd_ctx.ctx.id == BSP_LCD_ID_ILI9341) {
         lcd_reg_config_ili9341();
-    } else if (lcd_ctx.id == BSP_LCD_ID_ST7789V) {
+    } else if (s_lcd_ctx.ctx.id == BSP_LCD_ID_ST7789V) {
         lcd_reg_config_st7789v();
     } else {
         /* 未知控制器, 尝试 ILI9341 序列 */
@@ -553,23 +559,23 @@ void BSP_LCD_SetScanMode(BSP_LCD_ScanMode_t mode)
 {
     if (mode > 7) return;
 
-    lcd_ctx.scan_mode = mode;
+    s_lcd_ctx.ctx.scan_mode = mode;
 
     /* 根据模式更新 X/Y 长度 */
     if (mode % 2 == 0) {
         /* 0, 2, 4, 6: 横屏 */
-        lcd_ctx.x_length = BSP_LCD_WIDTH;
-        lcd_ctx.y_length = BSP_LCD_HEIGHT;
+        s_lcd_ctx.ctx.x_length = BSP_LCD_WIDTH;
+        s_lcd_ctx.ctx.y_length = BSP_LCD_HEIGHT;
     } else {
         /* 1, 3, 5, 7: 竖屏 */
-        lcd_ctx.x_length = BSP_LCD_HEIGHT;
-        lcd_ctx.y_length = BSP_LCD_WIDTH;
+        s_lcd_ctx.ctx.x_length = BSP_LCD_HEIGHT;
+        s_lcd_ctx.ctx.y_length = BSP_LCD_WIDTH;
     }
 
     /* 写 MADCTL 寄存器 */
     lcd_write_cmd(0x36);
 
-    if (lcd_ctx.id == BSP_LCD_ID_ST7789V) {
+    if (s_lcd_ctx.ctx.id == BSP_LCD_ID_ST7789V) {
         lcd_write_data(0x00 | ((uint16_t)mode << 5));
     } else {
         lcd_write_data(0x08 | ((uint16_t)mode << 5));
@@ -578,13 +584,13 @@ void BSP_LCD_SetScanMode(BSP_LCD_ScanMode_t mode)
     /* 更新全屏窗口 */
     lcd_write_cmd(0x2A);
     lcd_write_data(0x00); lcd_write_data(0x00);
-    lcd_write_data(((lcd_ctx.x_length - 1) >> 8) & 0xFF);
-    lcd_write_data((lcd_ctx.x_length - 1) & 0xFF);
+    lcd_write_data(((s_lcd_ctx.ctx.x_length - 1) >> 8) & 0xFF);
+    lcd_write_data((s_lcd_ctx.ctx.x_length - 1) & 0xFF);
 
     lcd_write_cmd(0x2B);
     lcd_write_data(0x00); lcd_write_data(0x00);
-    lcd_write_data(((lcd_ctx.y_length - 1) >> 8) & 0xFF);
-    lcd_write_data((lcd_ctx.y_length - 1) & 0xFF);
+    lcd_write_data(((s_lcd_ctx.ctx.y_length - 1) >> 8) & 0xFF);
+    lcd_write_data((s_lcd_ctx.ctx.y_length - 1) & 0xFF);
 
     /* 启动 GRAM 写入 */
     lcd_write_cmd(0x2C);
@@ -596,7 +602,7 @@ void BSP_LCD_SetScanMode(BSP_LCD_ScanMode_t mode)
 
 void BSP_LCD_SetPixel(uint16_t x, uint16_t y, uint16_t color)
 {
-    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return;
+    if (x >= s_lcd_ctx.ctx.x_length || y >= s_lcd_ctx.ctx.y_length) return;
 
     lcd_set_cursor(x, y);
     lcd_write_cmd(0x2C);
@@ -607,7 +613,7 @@ uint16_t BSP_LCD_GetPixel(uint16_t x, uint16_t y)
 {
     uint16_t r, g;
 
-    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return 0;
+    if (x >= s_lcd_ctx.ctx.x_length || y >= s_lcd_ctx.ctx.y_length) return 0;
 
     lcd_set_cursor(x, y);
     lcd_write_cmd(0x2E);          /* Read Memory Start */
@@ -620,7 +626,7 @@ uint16_t BSP_LCD_GetPixel(uint16_t x, uint16_t y)
 
 void BSP_LCD_Clear(uint16_t color)
 {
-    BSP_LCD_FillRect(0, 0, lcd_ctx.x_length, lcd_ctx.y_length, color);
+    BSP_LCD_FillRect(0, 0, s_lcd_ctx.ctx.x_length, s_lcd_ctx.ctx.y_length, color);
 }
 
 void BSP_LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t color)
@@ -628,9 +634,9 @@ void BSP_LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t c
     uint32_t total = (uint32_t)w * h;
     uint32_t i;
 
-    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return;
-    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
-    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+    if (x >= s_lcd_ctx.ctx.x_length || y >= s_lcd_ctx.ctx.y_length) return;
+    if (x + w > s_lcd_ctx.ctx.x_length) w = s_lcd_ctx.ctx.x_length - x;
+    if (y + h > s_lcd_ctx.ctx.y_length) h = s_lcd_ctx.ctx.y_length - y;
 
     lcd_open_window(x, y, w, h);
     lcd_write_cmd(0x2C);
@@ -648,43 +654,38 @@ void BSP_LCD_FillRect(uint16_t x, uint16_t y, uint16_t w, uint16_t h, uint16_t c
  * 完成回调在 DMA2_Channel1_IRQHandler 中断上下文执行.
  * ================================================================ */
 
-static DMA_HandleTypeDef lcd_dma;
-static void (*lcd_dma_done_cb)(void *arg) = NULL;
-static void *lcd_dma_done_arg = NULL;
-static volatile uint8_t lcd_dma_busy = 0;   /* 软件完成标志 (中断回调清 0) */
-
 static void lcd_dma_xfer_cplt(DMA_HandleTypeDef *hdma)
 {
     (void) hdma;
-    lcd_dma_busy = 0;
-    if (lcd_dma_done_cb) {
-        lcd_dma_done_cb(lcd_dma_done_arg);
+    s_lcd_ctx.dma_busy = 0;
+    if (s_lcd_ctx.dma_done_cb) {
+        s_lcd_ctx.dma_done_cb(s_lcd_ctx.dma_done_arg);
     }
 }
 
 void DMA2_Channel1_IRQHandler(void)
 {
-    HAL_DMA_IRQHandler(&lcd_dma);
+    HAL_DMA_IRQHandler(&s_lcd_ctx.dma);
 }
 
 static void lcd_init_dma(void)
 {
     __HAL_RCC_DMA2_CLK_ENABLE();
 
-    lcd_dma.Instance                 = DMA2_Channel1;
-    lcd_dma.Init.Direction           = DMA_MEMORY_TO_MEMORY;   /* RAM → FSMC 数据区 */
+    s_lcd_ctx.dma.Instance                 = DMA2_Channel1;
+    s_lcd_ctx.dma.Init.Direction           = DMA_MEMORY_TO_MEMORY;   /* RAM → FSMC 数据区 */
     /* mem2mem: 源=CPAR(像素缓冲), 目标=CMAR(LCD 数据寄存器)
      * 源递增由 PINC 控制 → 必须 ENABLE; 目标固定由 MINC 控制 → DISABLE
      * (配反会导致 DMA 只读 buf[0], 全屏显示同色) */
-    lcd_dma.Init.PeriphInc            = DMA_PINC_ENABLE;        /* 源 (像素数据) 递增 */
-    lcd_dma.Init.MemInc               = DMA_MINC_DISABLE;       /* 目标 (LCD 寄存器) 固定 */
-    lcd_dma.Init.PeriphDataAlignment  = DMA_PDATAALIGN_HALFWORD; /* 16 位总线 */
-    lcd_dma.Init.MemDataAlignment     = DMA_MDATAALIGN_HALFWORD;
-    lcd_dma.Init.Mode                 = DMA_NORMAL;
-    lcd_dma.Init.Priority             = DMA_PRIORITY_HIGH;
-    HAL_DMA_Init(&lcd_dma);
+    s_lcd_ctx.dma.Init.PeriphInc            = DMA_PINC_ENABLE;        /* 源 (像素数据) 递增 */
+    s_lcd_ctx.dma.Init.MemInc               = DMA_MINC_DISABLE;       /* 目标 (LCD 寄存器) 固定 */
+    s_lcd_ctx.dma.Init.PeriphDataAlignment  = DMA_PDATAALIGN_HALFWORD; /* 16 位总线 */
+    s_lcd_ctx.dma.Init.MemDataAlignment     = DMA_MDATAALIGN_HALFWORD;
+    s_lcd_ctx.dma.Init.Mode                 = DMA_NORMAL;
+    s_lcd_ctx.dma.Init.Priority             = DMA_PRIORITY_HIGH;
+    HAL_DMA_Init(&s_lcd_ctx.dma);
 
-    lcd_dma.XferCpltCallback = lcd_dma_xfer_cplt;
+    s_lcd_ctx.dma.XferCpltCallback = lcd_dma_xfer_cplt;
 
     HAL_NVIC_SetPriority(DMA2_Channel1_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(DMA2_Channel1_IRQn);
@@ -694,7 +695,7 @@ void BSP_LCD_DMA_WaitDone(void)
 {
     /* 轮询软件完成标志 (中断回调清 0) — 比轮询 TC 硬件标志可靠:
      * TC 会被中断处理清除, 软件标志在回调里维护 */
-    while (lcd_dma_busy) {
+    while (s_lcd_ctx.dma_busy) {
     }
 }
 
@@ -704,9 +705,9 @@ void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 {
     uint32_t total;
 
-    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) goto fail;
-    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
-    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+    if (x >= s_lcd_ctx.ctx.x_length || y >= s_lcd_ctx.ctx.y_length) goto fail;
+    if (x + w > s_lcd_ctx.ctx.x_length) w = s_lcd_ctx.ctx.x_length - x;
+    if (y + h > s_lcd_ctx.ctx.y_length) h = s_lcd_ctx.ctx.y_length - y;
 
     total = (uint32_t)w * h;
     if (total == 0) goto fail;
@@ -717,16 +718,16 @@ void BSP_LCD_WritePixels_DMA(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
 
     /* 防重入: 上一传输仍在飞 (LVGL 双缓冲可能连续调用 flush) → 先等待完成
      * 正常情况几乎不会触发: DMA 搬一块 ~0.6ms, 渲染一块 ~2-5ms */
-    if (lcd_dma_busy) {
+    if (s_lcd_ctx.dma_busy) {
         BSP_LCD_DMA_WaitDone();
     }
 
-    lcd_dma_done_cb = done_cb;
-    lcd_dma_done_arg = arg;
-    lcd_dma_busy = 1;
+    s_lcd_ctx.dma_done_cb = done_cb;
+    s_lcd_ctx.dma_done_arg = arg;
+    s_lcd_ctx.dma_busy = 1;
 
-    if (HAL_DMA_Start_IT(&lcd_dma, (uint32_t)data, FSMC_LCD_DATA_ADDR, total) != HAL_OK) {
-        lcd_dma_busy = 0;
+    if (HAL_DMA_Start_IT(&s_lcd_ctx.dma, (uint32_t)data, FSMC_LCD_DATA_ADDR, total) != HAL_OK) {
+        s_lcd_ctx.dma_busy = 0;
         goto fail;
     }
     return;
@@ -867,11 +868,11 @@ void BSP_LCD_DrawString(uint16_t x, uint16_t y, const char *str, const sFONT *fo
 
     while (*str != '\0') {
         /* 换行检查 */
-        if (cur_x + font->Width > lcd_ctx.x_length) {
+        if (cur_x + font->Width > s_lcd_ctx.ctx.x_length) {
             cur_x = x;
             cur_y += font->Height;
         }
-        if (cur_y + font->Height > lcd_ctx.y_length) {
+        if (cur_y + font->Height > s_lcd_ctx.ctx.y_length) {
             cur_x = x;
             cur_y = y;
         }
@@ -889,9 +890,9 @@ void BSP_LCD_WritePixels(uint16_t x, uint16_t y, uint16_t w, uint16_t h,
     uint32_t total = (uint32_t)w * h;
     uint32_t i;
 
-    if (x >= lcd_ctx.x_length || y >= lcd_ctx.y_length) return;
-    if (x + w > lcd_ctx.x_length) w = lcd_ctx.x_length - x;
-    if (y + h > lcd_ctx.y_length) h = lcd_ctx.y_length - y;
+    if (x >= s_lcd_ctx.ctx.x_length || y >= s_lcd_ctx.ctx.y_length) return;
+    if (x + w > s_lcd_ctx.ctx.x_length) w = s_lcd_ctx.ctx.x_length - x;
+    if (y + h > s_lcd_ctx.ctx.y_length) h = s_lcd_ctx.ctx.y_length - y;
 
     lcd_open_window(x, y, w, h);
     lcd_write_cmd(0x2C);

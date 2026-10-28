@@ -40,7 +40,7 @@
 
 /* 上层注册的 ISR 回调。只在 BSP_W5500_HW_EnableInt() 里被写过一次, 之后
  * ISR 只读 —— 所以不需要临界区。 */
-static BSP_W5500_IntCallback_t s_int_cb;
+static BSP_W5500_IntCallback_t s_w5500_int_cb;
 
 /* ================================================================
  * 公开 API
@@ -111,7 +111,7 @@ void BSP_W5500_HW_EnableInt(BSP_W5500_IntCallback_t cb)
     if (cb == NULL) {
         return;                     /* 没有回调就没有唤醒对象, 开了也只是空转 */
     }
-    s_int_cb = cb;
+    s_w5500_int_cb = cb;
 
     /* 把 PG8 从"普通输入"改成"下降沿触发中断"。上拉保持不变 —— INT 是
      * 低有效输出, 空闲时靠上拉维持高电平。 */
@@ -135,5 +135,5 @@ void BSP_W5500_HW_ExtiHandler(void)
     /* ⚠️ 这里【不】去清芯片的 IR 标志: 那要发 SPI 帧, 中断上下文里不行
      *    (bsp_spi 有 __get_IPSR() 断言)。所以 INT 线会在处理完之前一直保持
      *    低 —— 这正是下面这个回调必须"只叫醒、不处理"的原因。 */
-    s_int_cb();
+    s_w5500_int_cb();
 }

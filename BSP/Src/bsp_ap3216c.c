@@ -80,7 +80,7 @@ static const uint32_t kModeSetDelayMs     = 100;
  * 模块级状态: 记录当前 ALS 量程
  * ================================================================ */
 
-static BSP_AP3216C_AlsRange_t s_als_range = BSP_AP3216C_ALS_RANGE_20661;
+static BSP_AP3216C_AlsRange_t s_ap3216c_als_range = BSP_AP3216C_ALS_RANGE_20661;
 
 /* ================================================================
  * 内部: 错误码映射
@@ -142,7 +142,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_Init(BSP_AP3216C_AlsRange_t range)
 {
     BSP_AP3216C_Status_t ret;
 
-    s_als_range = range;
+    s_ap3216c_als_range = range;
 
     /* ---- I2C 总线初始化 (幂等) ---- */
     ap3216c_i2c_init(AP3216C_I2C_BUS_ID, kI2cSpeed);
@@ -194,7 +194,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadAll(BSP_AP3216C_Data_t *p_data)
     /* ---- 2. ALS: 低字节 + 高字节 (对齐官方 read_low_and_high) ---- */
     ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
-    p_data->als_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_als_range];
+    p_data->als_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_ap3216c_als_range];
 
     /* ---- 3. PS: 低字节 + 高字节 ---- */
     ret = ap3216c_read_two_regs(kRegPsDataLow, &raw);
@@ -225,7 +225,7 @@ BSP_AP3216C_Status_t BSP_AP3216C_ReadALS(float *p_lux)
     BSP_AP3216C_Status_t ret = ap3216c_read_two_regs(kRegAlsDataLow, &raw);
     if (ret != BSP_AP3216C_OK) return ret;
 
-    *p_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_als_range];
+    *p_lux = (float)(raw & 0xFFFF) * kAlsResolution[s_ap3216c_als_range];
     return BSP_AP3216C_OK;
 }
 

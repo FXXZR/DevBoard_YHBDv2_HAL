@@ -38,12 +38,13 @@ static const uint32_t reset_boot_ms = 200U;
  * 运行时上下文
  * ================================================================ */
 
-static volatile uint8_t esp8266_initialized = 0;
-static volatile uint8_t esp8266_enabled    = 0;
-
-/* TX 环形缓冲 —— USART3 的使用者就是本模块, 所以由本模块提供.
- * 开 1KB: AT 命令短, 但透传模式下一次可能灌入较长的 TCP 载荷 */
-static uint8_t esp8266_tx_buf[1024];
+static struct {
+    volatile uint8_t initialized;
+    volatile uint8_t enabled;
+    /* TX 环形缓冲 —— USART3 的使用者就是本模块, 所以由本模块提供.
+     * 开 1KB: AT 命令短, 但透传模式下一次可能灌入较长的 TCP 载荷 */
+    uint8_t tx_buf[1024];
+} s_esp8266;
 
 /* ================================================================
  * 公开 API
@@ -73,7 +74,7 @@ void BSP_ESP8266_Init(uint32_t baudrate)
  */
 void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
 {
-    if (esp8266_initialized) {
+    if (s_esp8266.initialized) {
         BSP_ESP8266_DeInit();
     }
 
@@ -90,7 +91,7 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(WIFI_EN_PORT, &gpio);
     HAL_GPIO_WritePin(WIFI_EN_PORT, WIFI_EN_PIN, GPIO_PIN_SET);
-    esp8266_enabled = 1;
+    s_esp8266.enabled = 1;
 
     /* ---- PG14: WIFI_RST (EX_RSTB), 初始拉低保持复位 ---- */
     gpio.Pin  = WIFI_RST_PIN;
@@ -108,8 +109,8 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
         .parity           = config->parity,
         .tx_cplt_callback = NULL,  /* ESP8266 全双工, 不需要方向切换 */
         .rx_idle_callback = config->rx_idle_callback,
-        .tx_buf           = esp8266_tx_buf,
-        .tx_buf_size      = sizeof(esp8266_tx_buf),
+        .tx_buf           = s_esp8266.tx_buf,
+        .tx_buf_size      = sizeof(s_esp8266.tx_buf),
     };
     BSP_USART_InitEx(ESP8266_USART_ID, &usart_cfg);
 
@@ -120,7 +121,7 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
     /* 清空启动期间 ESP8266 可能发出的数据 (boot ROM 74880baud 噪声等) */
     BSP_USART_FlushRx(ESP8266_USART_ID);
 
-    esp8266_initialized = 1;
+    s_esp8266.initialized = 1;
 }
 
 /**
@@ -128,13 +129,13 @@ void BSP_ESP8266_InitEx(const BSP_ESP8266_Config_t *config)
  */
 void BSP_ESP8266_DeInit(void)
 {
-    if (!esp8266_initialized) return;
+    if (!s_esp8266.initialized) return;
 
     BSP_USART_DeInit(ESP8266_USART_ID);
     HAL_GPIO_DeInit(WIFI_EN_PORT, WIFI_EN_PIN);
     HAL_GPIO_DeInit(WIFI_RST_PORT, WIFI_RST_PIN);
-    esp8266_enabled    = 0;
-    esp8266_initialized = 0;
+    s_esp8266.enabled    = 0;
+    s_esp8266.initialized = 0;
 }
 
 /* ----------------------------------------------------------------
@@ -146,9 +147,9 @@ void BSP_ESP8266_DeInit(void)
  */
 void BSP_ESP8266_Enable(void)
 {
-    if (!esp8266_initialized) return;
+    if (!s_esp8266.initialized) return;
     HAL_GPIO_WritePin(WIFI_EN_PORT, WIFI_EN_PIN, GPIO_PIN_SET);
-    esp8266_enabled = 1;
+    s_esp8266.enabled = 1;
 }
 
 /**
@@ -156,9 +157,9 @@ void BSP_ESP8266_Enable(void)
  */
 void BSP_ESP8266_Disable(void)
 {
-    if (!esp8266_initialized) return;
+    if (!s_esp8266.initialized) return;
     HAL_GPIO_WritePin(WIFI_EN_PORT, WIFI_EN_PIN, GPIO_PIN_RESET);
-    esp8266_enabled = 0;
+    s_esp8266.enabled = 0;
 }
 
 /**
@@ -167,10 +168,10 @@ void BSP_ESP8266_Disable(void)
  */
 void BSP_ESP8266_Reset(void)
 {
-    if (!esp8266_initialized) return;
+    if (!s_esp8266.initialized) return;
 
     /* 确保模块已使能 */
-    if (!esp8266_enabled) {
+    if (!s_esp8266.enabled) {
         BSP_ESP8266_Enable();
         esp8266_delay_ms(10);
     }
@@ -192,7 +193,7 @@ void BSP_ESP8266_Reset(void)
  */
 uint8_t BSP_ESP8266_IsEnabled(void)
 {
-    return esp8266_enabled;
+    return s_esp8266.enabled;
 }
 
 /* ----------------------------------------------------------------
@@ -201,7 +202,7 @@ uint8_t BSP_ESP8266_IsEnabled(void)
 
 uint16_t BSP_ESP8266_Send(const uint8_t *data, uint16_t len)
 {
-    if (!esp8266_initialized) return 0;
+    if (!s_esp8266.initialized) return 0;
     return BSP_USART_Send(ESP8266_USART_ID, data, len);
 }
 
@@ -213,7 +214,7 @@ uint16_t BSP_ESP8266_SendString(const char *str)
 
 int BSP_ESP8266_Flush(uint32_t timeout)
 {
-    if (!esp8266_initialized) return -1;
+    if (!s_esp8266.initialized) return -1;
     return BSP_USART_Flush(ESP8266_USART_ID, timeout);
 }
 
@@ -248,24 +249,24 @@ uint8_t BSP_ESP8266_TxIdle(void)
 
 uint16_t BSP_ESP8266_Available(void)
 {
-    if (!esp8266_initialized) return 0;
+    if (!s_esp8266.initialized) return 0;
     return BSP_USART_Available(ESP8266_USART_ID);
 }
 
 int BSP_ESP8266_Read(uint8_t *ch)
 {
-    if (!esp8266_initialized) return -1;
+    if (!s_esp8266.initialized) return -1;
     return BSP_USART_Read(ESP8266_USART_ID, ch);
 }
 
 uint16_t BSP_ESP8266_ReadBytes(uint8_t *buf, uint16_t len)
 {
-    if (!esp8266_initialized) return 0;
+    if (!s_esp8266.initialized) return 0;
     return BSP_USART_ReadBytes(ESP8266_USART_ID, buf, len);
 }
 
 void BSP_ESP8266_FlushRx(void)
 {
-    if (!esp8266_initialized) return;
+    if (!s_esp8266.initialized) return;
     BSP_USART_FlushRx(ESP8266_USART_ID);
 }

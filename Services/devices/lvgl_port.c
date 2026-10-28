@@ -23,8 +23,8 @@
  * 静态变量
  * ================================================================ */
 
-static lv_disp_drv_t s_disp_drv;        /* 显示驱动 (DMA 完成回调需要) */
-static lv_disp_drv_t *s_flush_drv;      /* 当前正在 DMA flush 的驱动 */
+static lv_disp_drv_t s_lvgl_disp_drv;        /* 显示驱动 (DMA 完成回调需要) */
+static lv_disp_drv_t *s_lvgl_flush_drv;      /* 当前正在 DMA flush 的驱动 */
 
 /* ================================================================
  * 静态原型
@@ -53,14 +53,14 @@ void lvgl_port_init(void)
     lv_disp_draw_buf_init(&draw_buf, buf_1, buf_2, 240 * 32);
 
     /* ---- 3. 注册显示驱动 ---- */
-    lv_disp_drv_init(&s_disp_drv);
+    lv_disp_drv_init(&s_lvgl_disp_drv);
 
-    s_disp_drv.hor_res  = 240;
-    s_disp_drv.ver_res  = 320;
-    s_disp_drv.flush_cb = lvgl_disp_flush;
-    s_disp_drv.draw_buf = &draw_buf;
+    s_lvgl_disp_drv.hor_res  = 240;
+    s_lvgl_disp_drv.ver_res  = 320;
+    s_lvgl_disp_drv.flush_cb = lvgl_disp_flush;
+    s_lvgl_disp_drv.draw_buf = &draw_buf;
 
-    lv_disp_drv_register(&s_disp_drv);
+    lv_disp_drv_register(&s_lvgl_disp_drv);
 
     /* ---- 4. 触摸屏初始化 (依赖 LCD 已初始化) ---- */
     BSP_XPT2046_Init();
@@ -85,7 +85,7 @@ static void lvgl_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
 
     /* DMA 异步搬运: 像素由 DMA2 后台写入 LCD, 完成中断里调 flush_ready
      * (RGB565 与 LVGL 颜色深度一致, 零拷贝) */
-    s_flush_drv = disp_drv;
+    s_lvgl_flush_drv = disp_drv;
     BSP_LCD_WritePixels_DMA(area->x1, area->y1, w, h,
                             (const uint16_t *)color_p, lvgl_lcd_dma_done, NULL);
 }
@@ -94,7 +94,7 @@ static void lvgl_disp_flush(lv_disp_drv_t *disp_drv, const lv_area_t *area,
 static void lvgl_lcd_dma_done(void *arg)
 {
     (void) arg;
-    lv_disp_flush_ready(s_flush_drv);
+    lv_disp_flush_ready(s_lvgl_flush_drv);
 }
 
 /* ================================================================

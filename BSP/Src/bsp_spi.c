@@ -84,7 +84,7 @@ typedef struct {
     uint8_t           initialized;
 } SPI_Ctx_t;
 
-static SPI_Ctx_t spi_ctx[BSP_SPI_BUS_COUNT];
+static SPI_Ctx_t s_spi_ctx[BSP_SPI_BUS_COUNT];
 
 /* ================================================================
  * 内部辅助
@@ -145,7 +145,7 @@ void BSP_SPI_Init(BSP_SPI_Bus_Id_t id, BSP_SPI_BaudPrescaler_t prescaler)
     BSP_ASSERT(id < BSP_SPI_BUS_COUNT);
     BSP_ASSERT(prescaler <= BSP_SPI_BAUD_DIV_256);
 
-    SPI_Ctx_t          *ctx = &spi_ctx[id];
+    SPI_Ctx_t          *ctx = &s_spi_ctx[id];
     const SPI_HW_Map_t *hw  = &spi_hw_map[id];
 
     if (ctx->initialized) return;
@@ -176,11 +176,11 @@ void BSP_SPI_Init(BSP_SPI_Bus_Id_t id, BSP_SPI_BaudPrescaler_t prescaler)
 uint8_t BSP_SPI_Transfer(BSP_SPI_Bus_Id_t id, uint8_t data, uint32_t timeout)
 {
     BSP_ASSERT(id < BSP_SPI_BUS_COUNT);
-    BSP_ASSERT(spi_ctx[id].initialized);   /* 忘了 BSP_SPI_Init */
+    BSP_ASSERT(s_spi_ctx[id].initialized);   /* 忘了 BSP_SPI_Init */
     BSP_ASSERT(__get_IPSR() == 0);         /* ISR 里不做阻塞式传输 */
 
     uint8_t rx = 0xFF;
-    HAL_SPI_TransmitReceive(&spi_ctx[id].handle, &data, &rx, 1, timeout);
+    HAL_SPI_TransmitReceive(&s_spi_ctx[id].handle, &data, &rx, 1, timeout);
     return rx;
 }
 
@@ -191,16 +191,16 @@ BSP_SPI_Status_t BSP_SPI_TransferBuffer(BSP_SPI_Bus_Id_t id,
     HAL_StatusTypeDef hal_st;
 
     BSP_ASSERT(id < BSP_SPI_BUS_COUNT);
-    BSP_ASSERT(spi_ctx[id].initialized);
+    BSP_ASSERT(s_spi_ctx[id].initialized);
     BSP_ASSERT(__get_IPSR() == 0);         /* ISR 里不做阻塞式传输 */
     BSP_ASSERT(tx != NULL);
     BSP_ASSERT(len > 0);                   /* 零长度"传输"几乎总是算错了长度 */
 
     if (rx) {
-        hal_st = HAL_SPI_TransmitReceive(&spi_ctx[id].handle,
+        hal_st = HAL_SPI_TransmitReceive(&s_spi_ctx[id].handle,
                                          (uint8_t *)tx, rx, len, timeout);
     } else {
-        hal_st = HAL_SPI_Transmit(&spi_ctx[id].handle, (uint8_t *)tx, len, timeout);
+        hal_st = HAL_SPI_Transmit(&s_spi_ctx[id].handle, (uint8_t *)tx, len, timeout);
     }
 
     return (hal_st == HAL_OK) ? BSP_SPI_OK : BSP_SPI_ERR_TIMEOUT;

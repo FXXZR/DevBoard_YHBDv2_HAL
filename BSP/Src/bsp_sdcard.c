@@ -58,7 +58,7 @@ typedef struct {
     volatile uint8_t      transfer_error;  /* DMA 传输错误标志 */
 } SDCard_Ctx_t;
 
-static SDCard_Ctx_t s_ctx[BSP_SDCARD_BUS_COUNT];
+static SDCard_Ctx_t s_sdcard_ctx[BSP_SDCARD_BUS_COUNT];
 
 /* ================================================================
  * 内部辅助函数声明
@@ -83,8 +83,8 @@ void SDIO_IRQHandler(void)
 {
     /* 根据 handle 分发 — 遍历上下文找到匹配的 handle */
     for (int i = 0; i < BSP_SDCARD_BUS_COUNT; i++) {
-        if (s_ctx[i].initialized) {
-            HAL_SD_IRQHandler(&s_ctx[i].hsd);
+        if (s_sdcard_ctx[i].initialized) {
+            HAL_SD_IRQHandler(&s_sdcard_ctx[i].hsd);
         }
     }
 }
@@ -96,9 +96,9 @@ void SDIO_IRQHandler(void)
 void DMA2_Channel4_5_IRQHandler(void)
 {
     for (int i = 0; i < BSP_SDCARD_BUS_COUNT; i++) {
-        if (s_ctx[i].initialized) {
-            HAL_DMA_IRQHandler(s_ctx[i].hsd.hdmatx);
-            HAL_DMA_IRQHandler(s_ctx[i].hsd.hdmarx);
+        if (s_sdcard_ctx[i].initialized) {
+            HAL_DMA_IRQHandler(s_sdcard_ctx[i].hsd.hdmatx);
+            HAL_DMA_IRQHandler(s_sdcard_ctx[i].hsd.hdmarx);
         }
     }
 }
@@ -108,8 +108,8 @@ void DMA2_Channel4_5_IRQHandler(void)
 void HAL_SD_TxCpltCallback(SD_HandleTypeDef *hsd)
 {
     for (int i = 0; i < BSP_SDCARD_BUS_COUNT; i++) {
-        if (&s_ctx[i].hsd == hsd) {
-            s_ctx[i].transfer_done = 1;
+        if (&s_sdcard_ctx[i].hsd == hsd) {
+            s_sdcard_ctx[i].transfer_done = 1;
             return;
         }
     }
@@ -118,8 +118,8 @@ void HAL_SD_TxCpltCallback(SD_HandleTypeDef *hsd)
 void HAL_SD_RxCpltCallback(SD_HandleTypeDef *hsd)
 {
     for (int i = 0; i < BSP_SDCARD_BUS_COUNT; i++) {
-        if (&s_ctx[i].hsd == hsd) {
-            s_ctx[i].transfer_done = 1;
+        if (&s_sdcard_ctx[i].hsd == hsd) {
+            s_sdcard_ctx[i].transfer_done = 1;
             return;
         }
     }
@@ -128,8 +128,8 @@ void HAL_SD_RxCpltCallback(SD_HandleTypeDef *hsd)
 void HAL_SD_ErrorCallback(SD_HandleTypeDef *hsd)
 {
     for (int i = 0; i < BSP_SDCARD_BUS_COUNT; i++) {
-        if (&s_ctx[i].hsd == hsd) {
-            s_ctx[i].transfer_error = 1;
+        if (&s_sdcard_ctx[i].hsd == hsd) {
+            s_sdcard_ctx[i].transfer_error = 1;
             return;
         }
     }
@@ -373,7 +373,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_Init(BSP_SDCARD_Bus_Id_t id)
 {
     if (id >= BSP_SDCARD_BUS_COUNT) return BSP_SDCARD_ERROR;
 
-    SDCard_Ctx_t *ctx = &s_ctx[id];
+    SDCard_Ctx_t *ctx = &s_sdcard_ctx[id];
     const SDCard_HW_Map_t *hw = &hw_map[id];
 
     /* 幂等: 已初始化直接返回 */
@@ -432,7 +432,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_Read(BSP_SDCARD_Bus_Id_t id, uint8_t *buf,
 {
     if (id >= BSP_SDCARD_BUS_COUNT) return BSP_SDCARD_ERROR;
 
-    SDCard_Ctx_t *ctx = &s_ctx[id];
+    SDCard_Ctx_t *ctx = &s_sdcard_ctx[id];
     if (!ctx->initialized) return BSP_SDCARD_ERROR;
 
     /* 逐扇区读取 (sdcard_read_sector 内部处理 SDSC bounce / SDHC DMA) */
@@ -451,7 +451,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_Write(BSP_SDCARD_Bus_Id_t id, const uint8_t *buf,
 {
     if (id >= BSP_SDCARD_BUS_COUNT) return BSP_SDCARD_ERROR;
 
-    SDCard_Ctx_t *ctx = &s_ctx[id];
+    SDCard_Ctx_t *ctx = &s_sdcard_ctx[id];
     if (!ctx->initialized) return BSP_SDCARD_ERROR;
 
     /* 逐扇区写入 */
@@ -469,7 +469,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_GetInfo(BSP_SDCARD_Bus_Id_t id, BSP_SDCARD_CardIn
 {
     if (id >= BSP_SDCARD_BUS_COUNT || info == NULL) return BSP_SDCARD_ERROR;
 
-    SDCard_Ctx_t *ctx = &s_ctx[id];
+    SDCard_Ctx_t *ctx = &s_sdcard_ctx[id];
     if (!ctx->initialized) return BSP_SDCARD_ERROR;
 
     *info = ctx->info;
@@ -482,7 +482,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_GetInfo(BSP_SDCARD_Bus_Id_t id, BSP_SDCARD_CardIn
 uint8_t BSP_SDCARD_IsReady(BSP_SDCARD_Bus_Id_t id)
 {
     if (id >= BSP_SDCARD_BUS_COUNT) return 0;
-    return s_ctx[id].initialized ? 1 : 0;
+    return s_sdcard_ctx[id].initialized ? 1 : 0;
 }
 
 /**
@@ -492,7 +492,7 @@ BSP_SDCARD_Status_t BSP_SDCARD_DeInit(BSP_SDCARD_Bus_Id_t id)
 {
     if (id >= BSP_SDCARD_BUS_COUNT) return BSP_SDCARD_ERROR;
 
-    SDCard_Ctx_t *ctx = &s_ctx[id];
+    SDCard_Ctx_t *ctx = &s_sdcard_ctx[id];
     if (!ctx->initialized) return BSP_SDCARD_OK;
 
     HAL_SD_DeInit(&ctx->hsd);

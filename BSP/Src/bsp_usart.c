@@ -124,7 +124,7 @@ typedef struct {
     BSP_USART_RxIdleCallback_t   rx_idle_cb;
 } USART_Ctx_t;
 
-static USART_Ctx_t usart_ctx[BSP_USART_COUNT];
+static USART_Ctx_t s_usart_ctx[BSP_USART_COUNT];
 
 /* ================================================================
  * 内部辅助
@@ -150,7 +150,7 @@ static uint32_t usart_conv_parity(BSP_USART_Parity_t par)
 static USART_Ctx_t *usart_ctx_from_huart(UART_HandleTypeDef *huart)
 {
     for (int i = 0; i < BSP_USART_COUNT; i++)
-        if (&usart_ctx[i].huart == huart) return &usart_ctx[i];
+        if (&s_usart_ctx[i].huart == huart) return &s_usart_ctx[i];
     return NULL;
 }
 
@@ -253,7 +253,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     }
 
     if (ctx->rx_idle_cb) {
-        BSP_USART_Id_t id = (BSP_USART_Id_t)(ctx - usart_ctx);
+        BSP_USART_Id_t id = (BSP_USART_Id_t)(ctx - s_usart_ctx);
         ctx->rx_idle_cb(id);
     }
 
@@ -356,28 +356,28 @@ static void usart_deinit_gpio(const USART_HW_Map_t *hw)
  * ISR — USART
  * ================================================================ */
 
-void USART1_IRQHandler(void) { HAL_UART_IRQHandler(&usart_ctx[BSP_USART1].huart); }
-void USART2_IRQHandler(void) { HAL_UART_IRQHandler(&usart_ctx[BSP_USART2].huart); }
-void USART3_IRQHandler(void) { HAL_UART_IRQHandler(&usart_ctx[BSP_USART3].huart); }
-void UART4_IRQHandler(void)  { HAL_UART_IRQHandler(&usart_ctx[BSP_USART4].huart); }
-void UART5_IRQHandler(void)  { HAL_UART_IRQHandler(&usart_ctx[BSP_USART5].huart); }
+void USART1_IRQHandler(void) { HAL_UART_IRQHandler(&s_usart_ctx[BSP_USART1].huart); }
+void USART2_IRQHandler(void) { HAL_UART_IRQHandler(&s_usart_ctx[BSP_USART2].huart); }
+void USART3_IRQHandler(void) { HAL_UART_IRQHandler(&s_usart_ctx[BSP_USART3].huart); }
+void UART4_IRQHandler(void)  { HAL_UART_IRQHandler(&s_usart_ctx[BSP_USART4].huart); }
+void UART5_IRQHandler(void)  { HAL_UART_IRQHandler(&s_usart_ctx[BSP_USART5].huart); }
 
 /* ================================================================
  * ISR — DMA RX
  * ================================================================ */
 
-void DMA1_Channel3_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART3].hdma_rx); }
-void DMA1_Channel5_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART1].hdma_rx); }
-void DMA1_Channel6_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART2].hdma_rx); }
-void DMA2_Channel3_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART4].hdma_rx); }
+void DMA1_Channel3_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART3].hdma_rx); }
+void DMA1_Channel5_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART1].hdma_rx); }
+void DMA1_Channel6_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART2].hdma_rx); }
+void DMA2_Channel3_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART4].hdma_rx); }
 
 /* ================================================================
  * ISR — DMA TX
  * ================================================================ */
 
-void DMA1_Channel2_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART3].hdma_tx); }
-void DMA1_Channel4_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART1].hdma_tx); }
-void DMA1_Channel7_IRQHandler(void) { HAL_DMA_IRQHandler(&usart_ctx[BSP_USART2].hdma_tx); }
+void DMA1_Channel2_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART3].hdma_tx); }
+void DMA1_Channel4_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART1].hdma_tx); }
+void DMA1_Channel7_IRQHandler(void) { HAL_DMA_IRQHandler(&s_usart_ctx[BSP_USART2].hdma_tx); }
 /* UART4_TX = DMA2_Channel5, 与 SDIO(DMA2_Channel4) 共享 DMA2_Channel4_5_IRQHandler,
    此 IRQ 已在 bsp_sdcard.c 中定义, 在此不再重复注册. */
 
@@ -390,7 +390,7 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
     if (id >= BSP_USART_COUNT || !config) return;
 
     const USART_HW_Map_t *hw  = &usart_hw_map[id];
-    USART_Ctx_t          *ctx = &usart_ctx[id];
+    USART_Ctx_t          *ctx = &s_usart_ctx[id];
 
     if (ctx->initialized) BSP_USART_DeInit(id);
     memset(ctx, 0, sizeof(*ctx));
@@ -473,7 +473,7 @@ void BSP_USART_InitEx(BSP_USART_Id_t id, const BSP_USART_Config_t *config)
 void BSP_USART_DeInit(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return;
-    USART_Ctx_t          *ctx = &usart_ctx[id];
+    USART_Ctx_t          *ctx = &s_usart_ctx[id];
     const USART_HW_Map_t *hw  = &usart_hw_map[id];
     if (!ctx->initialized) return;
 
@@ -503,7 +503,7 @@ uint16_t BSP_USART_Write(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
 {
     if (id >= BSP_USART_COUNT || !data || !len) return 0;
 
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized || !ctx->tx_buf) return 0;
 
     uint32_t primask = usart_crit_enter();
@@ -539,7 +539,7 @@ uint16_t BSP_USART_Send(BSP_USART_Id_t id, const uint8_t *data, uint16_t len)
 uint16_t BSP_USART_TxSpace(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return 0;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized || !ctx->tx_buf) return 0;
 
     uint32_t primask = usart_crit_enter();
@@ -551,7 +551,7 @@ uint16_t BSP_USART_TxSpace(BSP_USART_Id_t id)
 uint16_t BSP_USART_TxPending(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return 0;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 0;
     return usart_tx_used(ctx);
 }
@@ -559,7 +559,7 @@ uint16_t BSP_USART_TxPending(BSP_USART_Id_t id)
 uint8_t BSP_USART_TxIdle(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return 1;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 1;
     return (uint8_t)(!ctx->tx_active && usart_tx_used(ctx) == 0);
 }
@@ -568,7 +568,7 @@ uint16_t BSP_USART_SendDirect(BSP_USART_Id_t id, const uint8_t *data, uint16_t l
 {
     if (id >= BSP_USART_COUNT || !data || !len) return 0;
 
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 0;
 
     uint32_t primask = usart_crit_enter();
@@ -606,7 +606,7 @@ int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout)
 {
     if (id >= BSP_USART_COUNT) return -1;
 
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return -1;
 
     uint32_t elapsed = 0;
@@ -625,7 +625,7 @@ int BSP_USART_Flush(BSP_USART_Id_t id, uint32_t timeout)
 uint16_t BSP_USART_Available(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return 0;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 0;
 
     /* 溢出时只报「满」 —— 不能让调用者拿到比缓冲还大的可读数 */
@@ -636,7 +636,7 @@ uint16_t BSP_USART_Available(BSP_USART_Id_t id)
 int BSP_USART_Read(BSP_USART_Id_t id, uint8_t *ch)
 {
     if (id >= BSP_USART_COUNT || !ch) return -1;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized || ctx->rx_read >= ctx->rx_count) return -1;
     *ch = ctx->rx_buf[ctx->rx_read & (USART_RX_BUF_SIZE - 1)];
     ctx->rx_read++;
@@ -646,7 +646,7 @@ int BSP_USART_Read(BSP_USART_Id_t id, uint8_t *ch)
 uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len)
 {
     if (id >= BSP_USART_COUNT || !buf || !len) return 0;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 0;
 
     uint16_t avail = (uint16_t)(ctx->rx_count - ctx->rx_read);
@@ -679,7 +679,7 @@ uint16_t BSP_USART_ReadBytes(BSP_USART_Id_t id, uint8_t *buf, uint16_t len)
 void BSP_USART_FlushRx(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return;
     ctx->rx_read = ctx->rx_count;
 }
@@ -687,7 +687,7 @@ void BSP_USART_FlushRx(BSP_USART_Id_t id)
 uint32_t BSP_USART_RxLost(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return 0;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return 0;
     return ctx->rx_lost;
 }
@@ -695,7 +695,7 @@ uint32_t BSP_USART_RxLost(BSP_USART_Id_t id)
 void BSP_USART_ClearRxLost(BSP_USART_Id_t id)
 {
     if (id >= BSP_USART_COUNT) return;
-    USART_Ctx_t *ctx = &usart_ctx[id];
+    USART_Ctx_t *ctx = &s_usart_ctx[id];
     if (!ctx->initialized) return;
     ctx->rx_lost = 0;
 }
@@ -714,9 +714,9 @@ int __io_putchar(int ch)
 {
     if (ch == '\n') {
         uint8_t cr = '\r';
-        HAL_UART_Transmit(&usart_ctx[BSP_USART1].huart, &cr, 1, HAL_MAX_DELAY);
+        HAL_UART_Transmit(&s_usart_ctx[BSP_USART1].huart, &cr, 1, HAL_MAX_DELAY);
     }
-    HAL_UART_Transmit(&usart_ctx[BSP_USART1].huart, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
+    HAL_UART_Transmit(&s_usart_ctx[BSP_USART1].huart, (uint8_t *)&ch, 1, HAL_MAX_DELAY);
     return ch;
 }
  * ================================================================ */

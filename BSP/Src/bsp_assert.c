@@ -42,7 +42,7 @@ static const uint32_t panic_spin_limit = 400000U;
  * ================================================================ */
 
 /* 0 = UART 不可用, 后续所有输出直接放弃 (避免每个字符都白等一轮) */
-static uint8_t s_uart_usable = 1U;
+static uint8_t s_assert_uart_usable = 1U;
 
 /* ================================================================
  * 底层输出原语
@@ -52,11 +52,11 @@ static void panic_putc(char c)
 {
     uint32_t guard;
 
-    if (!s_uart_usable) return;
+    if (!s_assert_uart_usable) return;
 
     guard = panic_spin_limit;
     while (!(PANIC_UART->SR & USART_SR_TXE)) {
-        if (--guard == 0U) { s_uart_usable = 0U; return; }
+        if (--guard == 0U) { s_assert_uart_usable = 0U; return; }
     }
 
     PANIC_UART->DR = (uint16_t)(uint8_t)c;
@@ -76,7 +76,7 @@ static void panic_uart_takeover(void)
      * 直接判定不可用, 比等 400000 次循环快得多. */
     if (!(RCC->APB2ENR & RCC_APB2ENR_USART1EN) ||
         !(PANIC_UART->CR1 & USART_CR1_UE)) {
-        s_uart_usable = 0U;
+        s_assert_uart_usable = 0U;
         return;
     }
 

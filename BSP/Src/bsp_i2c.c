@@ -42,7 +42,7 @@ typedef struct {
     uint8_t           initialized;
 } I2C_Ctx_t;
 
-static I2C_Ctx_t i2c_ctx[BSP_I2C_BUS_COUNT];
+static I2C_Ctx_t s_i2c_ctx[BSP_I2C_BUS_COUNT];
 
 /* ================================================================
  * 内部辅助
@@ -87,7 +87,7 @@ void BSP_I2C_Init(BSP_I2C_Bus_Id_t id, uint32_t clock_speed)
 {
     if (id >= BSP_I2C_BUS_COUNT) return;
 
-    I2C_Ctx_t          *ctx = &i2c_ctx[id];
+    I2C_Ctx_t          *ctx = &s_i2c_ctx[id];
     const I2C_HW_Map_t *hw  = &i2c_hw_map[id];
 
     if (ctx->initialized) return;
@@ -121,10 +121,10 @@ BSP_I2C_Status_t BSP_I2C_MemWrite(BSP_I2C_Bus_Id_t id,
                                   const uint8_t *data, uint16_t len,
                                   uint32_t timeout)
 {
-    if (id >= BSP_I2C_BUS_COUNT || !i2c_ctx[id].initialized) return BSP_I2C_ERROR;
+    if (id >= BSP_I2C_BUS_COUNT || !s_i2c_ctx[id].initialized) return BSP_I2C_ERROR;
 
     HAL_StatusTypeDef s = HAL_I2C_Mem_Write(
-        &i2c_ctx[id].handle,
+        &s_i2c_ctx[id].handle,
         (uint16_t)(dev_addr << 1),
         mem_addr,
         (mem_addr_size == 2) ? I2C_MEMADD_SIZE_16BIT : I2C_MEMADD_SIZE_8BIT,
@@ -139,10 +139,10 @@ BSP_I2C_Status_t BSP_I2C_MemRead(BSP_I2C_Bus_Id_t id,
                                  uint8_t *data, uint16_t len,
                                  uint32_t timeout)
 {
-    if (id >= BSP_I2C_BUS_COUNT || !i2c_ctx[id].initialized) return BSP_I2C_ERROR;
+    if (id >= BSP_I2C_BUS_COUNT || !s_i2c_ctx[id].initialized) return BSP_I2C_ERROR;
 
     HAL_StatusTypeDef s = HAL_I2C_Mem_Read(
-        &i2c_ctx[id].handle,
+        &s_i2c_ctx[id].handle,
         (uint16_t)(dev_addr << 1),
         mem_addr,
         (mem_addr_size == 2) ? I2C_MEMADD_SIZE_16BIT : I2C_MEMADD_SIZE_8BIT,
@@ -155,10 +155,10 @@ BSP_I2C_Status_t BSP_I2C_IsDeviceReady(BSP_I2C_Bus_Id_t id,
                                        uint8_t dev_addr,
                                        uint32_t trials, uint32_t timeout)
 {
-    if (id >= BSP_I2C_BUS_COUNT || !i2c_ctx[id].initialized) return BSP_I2C_ERROR;
+    if (id >= BSP_I2C_BUS_COUNT || !s_i2c_ctx[id].initialized) return BSP_I2C_ERROR;
 
     HAL_StatusTypeDef s = HAL_I2C_IsDeviceReady(
-        &i2c_ctx[id].handle,
+        &s_i2c_ctx[id].handle,
         (uint16_t)(dev_addr << 1),
         trials, timeout);
 

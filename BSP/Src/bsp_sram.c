@@ -107,7 +107,7 @@ typedef struct {
     uint8_t            initialized;
 } SRAM_Ctx_t;
 
-static SRAM_Ctx_t sram_ctx;
+static SRAM_Ctx_t s_sram_ctx;
 
 /* ================================================================
  * 内部辅助
@@ -144,8 +144,8 @@ static void sram_init_fsmc_gpio(void)
 
 void BSP_SRAM_Init(void)
 {
-    if (sram_ctx.initialized) return;
-    sram_ctx.initialized = 1;
+    if (s_sram_ctx.initialized) return;
+    s_sram_ctx.initialized = 1;
 
     /* 1. 使能 FSMC 外设时钟 */
     __HAL_RCC_FSMC_CLK_ENABLE();
@@ -163,22 +163,22 @@ void BSP_SRAM_Init(void)
     timing.DataLatency           = 0x02;   /* HAL算术: (2-2)<<24=0, 异步模式不使用 */
     timing.AccessMode            = FSMC_ACCESS_MODE_A;
 
-    sram_ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
-    sram_ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
-    sram_ctx.handle.Init.NSBank            = FSMC_NORSRAM_BANK3;
-    sram_ctx.handle.Init.DataAddressMux    = FSMC_DATA_ADDRESS_MUX_DISABLE;
-    sram_ctx.handle.Init.MemoryType        = FSMC_MEMORY_TYPE_SRAM;
-    sram_ctx.handle.Init.MemoryDataWidth   = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
-    sram_ctx.handle.Init.BurstAccessMode   = FSMC_BURST_ACCESS_MODE_DISABLE;
-    sram_ctx.handle.Init.WaitSignalPolarity= FSMC_WAIT_SIGNAL_POLARITY_LOW;
-    sram_ctx.handle.Init.WrapMode          = FSMC_WRAP_MODE_DISABLE;
-    sram_ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
-    sram_ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
-    sram_ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
-    sram_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_DISABLE;
-    sram_ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
-    sram_ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
-    sram_ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
+    s_sram_ctx.handle.Instance               = FSMC_NORSRAM_DEVICE;
+    s_sram_ctx.handle.Extended               = FSMC_NORSRAM_EXTENDED_DEVICE;
+    s_sram_ctx.handle.Init.NSBank            = FSMC_NORSRAM_BANK3;
+    s_sram_ctx.handle.Init.DataAddressMux    = FSMC_DATA_ADDRESS_MUX_DISABLE;
+    s_sram_ctx.handle.Init.MemoryType        = FSMC_MEMORY_TYPE_SRAM;
+    s_sram_ctx.handle.Init.MemoryDataWidth   = FSMC_NORSRAM_MEM_BUS_WIDTH_16;
+    s_sram_ctx.handle.Init.BurstAccessMode   = FSMC_BURST_ACCESS_MODE_DISABLE;
+    s_sram_ctx.handle.Init.WaitSignalPolarity= FSMC_WAIT_SIGNAL_POLARITY_LOW;
+    s_sram_ctx.handle.Init.WrapMode          = FSMC_WRAP_MODE_DISABLE;
+    s_sram_ctx.handle.Init.WaitSignalActive  = FSMC_WAIT_TIMING_BEFORE_WS;
+    s_sram_ctx.handle.Init.WriteOperation    = FSMC_WRITE_OPERATION_ENABLE;
+    s_sram_ctx.handle.Init.WaitSignal        = FSMC_WAIT_SIGNAL_DISABLE;
+    s_sram_ctx.handle.Init.ExtendedMode      = FSMC_EXTENDED_MODE_DISABLE;
+    s_sram_ctx.handle.Init.AsynchronousWait  = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
+    s_sram_ctx.handle.Init.WriteBurst        = FSMC_WRITE_BURST_DISABLE;
+    s_sram_ctx.handle.Init.PageSize          = FSMC_PAGE_SIZE_NONE;
 
-    HAL_SRAM_Init(&sram_ctx.handle, &timing, &timing);
+    HAL_SRAM_Init(&s_sram_ctx.handle, &timing, &timing);
 }

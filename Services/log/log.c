@@ -25,17 +25,12 @@
 
 /* ================================================================
  * 模块状态
+ *
+ * 级别 → 单字符标记的表是只读常量, 单独放; 其余可变状态收在一个结构体里。
  * ================================================================ */
 
-static BSP_USART_Id_t     s_port    = BSP_USART1;
-static Log_Level_t        s_level   = LOG_LVL_DEBUG;
-static uint8_t            s_ready   = 0;
-
-/* 丢弃字节数 —— 诊断用, 非精确统计 (增减不做原子保护, 只用于观察趋势) */
-static volatile uint32_t  s_dropped = 0;
-
 /* 级别 → 单字符标记, 下标对应 Log_Level_t */
-static const char kLevelChar[LOG_LVL_COUNT] = { '?', 'E', 'W', 'I', 'D' };
+static const char level_char[LOG_LVL_COUNT] = { '?', 'E', 'W', 'I', 'D' };
 
 /* ================================================================
  * 时间戳源
@@ -51,9 +46,21 @@ static const char kLevelChar[LOG_LVL_COUNT] = { '?', 'E', 'W', 'I', 'D' };
  * 时间戳始终是「上电以来的毫秒数」, 单调且连续, 不会出现回跳.
  * ================================================================ */
 
-static uint32_t s_dwt_base   = 0;   /* LOG_Init 时刻的 DWT->CYCCNT */
-static uint32_t s_boot_ms    = 0;   /* 定格: 上电到调度器启动的耗时 */
-static uint8_t  s_sched_seen = 0;
+static struct {
+    BSP_USART_Id_t    port;
+    Log_Level_t       level;
+    uint8_t           ready;
+
+    /* 丢弃字节数 —— 诊断用, 非精确统计 (增减不做原子保护, 只用于观察趋势) */
+    volatile uint32_t dropped;
+
+    uint32_t          dwt_base;    /* LOG_Init 时刻的 DWT->CYCCNT */
+    uint32_t          boot_ms;     /* 定格: 上电到调度器启动的耗时 */
+    uint8_t           sched_seen;
+} s_log = {
+    .port  = BSP_USART1,
+    .level = LOG_LVL_DEBUG,
+};
 
 /** @brief 启动 DWT 周期计数器 */
 static void log_dwt_start(void)
@@ -61,7 +68,7 @@ static void log_dwt_start(void)
     CoreDebug->DEMCR |= CoreDebug_DEMCR_TRCENA_Msk;  /* 使能跟踪单元 (DWT 的总开关) */
     DWT->CYCCNT = 0;
     DWT->CTRL  |= DWT_CTRL_CYCCNTENA_Msk;            /* 启动周期计数 */
-    s_dwt_base = DWT->CYCCNT;
+    s_log.dwt_base = DWT->CYCCNT;
 }
 
 /** @brief 调度器启动前的毫秒数 (基于 DWT 周期计数)
@@ -69,13 +76,13 @@ static void log_dwt_start(void)
  *         不做回绕处理; 若 DWT 不可用则恒为 0, 退化成原行为. */
 static uint32_t log_dwt_ms(void)
 {
-    return (DWT->CYCCNT - s_dwt_base) / (SystemCoreClock / 1000U);
+    return (DWT->CYCCNT - s_log.dwt_base) / (SystemCoreClock / 1000U);
 }
 
 /** @brief 上电以来的毫秒数 */
 static uint32_t log_now_ms(void)
 {
-    if (!s_sched_seen) {
+    if (!s_log.sched_seen) {
         if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
             return log_dwt_ms();
         }
@@ -86,10 +93,10 @@ static uint32_t log_now_ms(void)
          * 启动起算, 两者之差恒为启动耗时, 与「何时发现」无关. */
         uint32_t dwt = log_dwt_ms();
         uint32_t hal = HAL_GetTick();
-        s_boot_ms    = (dwt >= hal) ? (dwt - hal) : 0U;   /* DWT 不可用时退化为 0 */
-        s_sched_seen = 1;
+        s_log.boot_ms    = (dwt >= hal) ? (dwt - hal) : 0U;   /* DWT 不可用时退化为 0 */
+        s_log.sched_seen = 1;
     }
-    return s_boot_ms + HAL_GetTick();
+    return s_log.boot_ms + HAL_GetTick();
 }
 
 /* ================================================================
@@ -98,12 +105,12 @@ static uint32_t log_now_ms(void)
 
 void LOG_Init(BSP_USART_Id_t port)
 {
-    s_port       = port;
-    s_level      = (Log_Level_t)LOG_LEVEL;
-    s_dropped    = 0;
-    s_boot_ms    = 0;
-    s_sched_seen = 0;
-    s_ready      = 1;
+    s_log.port       = port;
+    s_log.level      = (Log_Level_t)LOG_LEVEL;
+    s_log.dropped    = 0;
+    s_log.boot_ms    = 0;
+    s_log.sched_seen = 0;
+    s_log.ready      = 1;
 
     /* 必须在任何一条日志之前 —— 启动阶段的计时靠它 */
     log_dwt_start();
@@ -111,35 +118,35 @@ void LOG_Init(BSP_USART_Id_t port)
 
 void LOG_SetLevel(Log_Level_t lvl)
 {
-    if (lvl >= LOG_LVL_NONE && lvl < LOG_LVL_COUNT) s_level = lvl;
+    if (lvl >= LOG_LVL_NONE && lvl < LOG_LVL_COUNT) s_log.level = lvl;
 }
 
 Log_Level_t LOG_GetLevel(void)
 {
-    return s_level;
+    return s_log.level;
 }
 
 uint32_t LOG_GetDropped(void)
 {
-    return s_dropped;
+    return s_log.dropped;
 }
 
 void LOG_ClearDropped(void)
 {
-    s_dropped = 0;
+    s_log.dropped = 0;
 }
 
 void LOG_Output(Log_Level_t lvl, const char *tag, const char *fmt, ...)
 {
     /* 运行期过滤是第二道闸门 —— 宏已在预处理期挡掉大部分 */
-    if (!s_ready || !fmt || lvl <= LOG_LVL_NONE || lvl > s_level) return;
+    if (!s_log.ready || !fmt || lvl <= LOG_LVL_NONE || lvl > s_log.level) return;
 
     char line[LOG_LINE_MAX];
 
     /* ---- 头部: "[" + 右对齐 tick + "] " + 级别 + " " + 标签 + ": " ---- */
     int n = snprintf(line, sizeof(line), "[%8lu] %c %s: ",
                      (unsigned long)log_now_ms(),
-                     kLevelChar[lvl], tag ? tag : "?");
+                     level_char[lvl], tag ? tag : "?");
     if (n < 0 || (size_t)n >= sizeof(line) - 2U) return;
 
     /* ---- 正文: 预留 2 字节给 CRLF (room 含 vsnprintf 的 NUL 位) ---- */
@@ -159,8 +166,8 @@ void LOG_Output(Log_Level_t lvl, const char *tag, const char *fmt, ...)
     line[len++] = '\n';
 
     /* 入队即返回 —— 满了也不阻塞, 记一笔丢弃量 */
-    uint16_t sent = BSP_USART_Write(s_port, (const uint8_t *)line, (uint16_t)len);
-    if (sent < len) s_dropped += (uint32_t)(len - sent);
+    uint16_t sent = BSP_USART_Write(s_log.port, (const uint8_t *)line, (uint16_t)len);
+    if (sent < len) s_log.dropped += (uint32_t)(len - sent);
 }
 
 /* ================================================================
@@ -179,9 +186,9 @@ int __io_putchar(int ch)
 {
     if (ch == '\n') {
         static const uint8_t cr = '\r';
-        BSP_USART_Write(s_port, &cr, 1);
+        BSP_USART_Write(s_log.port, &cr, 1);
     }
     uint8_t c = (uint8_t)ch;
-    BSP_USART_Write(s_port, &c, 1);
+    BSP_USART_Write(s_log.port, &c, 1);
     return ch;
 }

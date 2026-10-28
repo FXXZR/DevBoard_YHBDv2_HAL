@@ -28,11 +28,11 @@
  * 运行时上下文
  * ================================================================ */
 
-static volatile uint8_t rs485_initialized = 0;
+static volatile uint8_t s_rs485_initialized = 0;
 
 /* TX 环形缓冲 —— USART2 的使用者就是本模块, 所以由本模块提供.
  * Modbus RTU 最大帧 256 字节, 开 256B 可整帧入队, 无需调用者续传 */
-static uint8_t rs485_tx_buf[256];
+static uint8_t s_rs485_tx_buf[256];
 
 /* ================================================================
  * TX 发送完成回调 (ISR 上下文)
@@ -75,7 +75,7 @@ void BSP_RS485_InitEx(const BSP_RS485_Config_t *config)
 {
     if (!config) return;
 
-    if (rs485_initialized) {
+    if (s_rs485_initialized) {
         BSP_RS485_DeInit();
     }
 
@@ -100,12 +100,12 @@ void BSP_RS485_InitEx(const BSP_RS485_Config_t *config)
         .parity           = config->parity,
         .tx_cplt_callback = rs485_tx_cplt_cb,
         .rx_idle_callback = config->rx_idle_callback,
-        .tx_buf           = rs485_tx_buf,
-        .tx_buf_size      = sizeof(rs485_tx_buf),
+        .tx_buf           = s_rs485_tx_buf,
+        .tx_buf_size      = sizeof(s_rs485_tx_buf),
     };
     BSP_USART_InitEx(RS485_USART_ID, &usart_cfg);
 
-    rs485_initialized = 1;
+    s_rs485_initialized = 1;
 }
 
 /**
@@ -113,11 +113,11 @@ void BSP_RS485_InitEx(const BSP_RS485_Config_t *config)
  */
 void BSP_RS485_DeInit(void)
 {
-    if (!rs485_initialized) return;
+    if (!s_rs485_initialized) return;
 
     BSP_USART_DeInit(RS485_USART_ID);
     HAL_GPIO_DeInit(RS485_DE_RE_PORT, RS485_DE_RE_PIN);
-    rs485_initialized = 0;
+    s_rs485_initialized = 0;
 }
 
 /* ----------------------------------------------------------------
@@ -135,7 +135,7 @@ void BSP_RS485_DeInit(void)
  */
 uint16_t BSP_RS485_Send(const uint8_t *data, uint16_t len)
 {
-    if (!rs485_initialized || !data || !len) return 0;
+    if (!s_rs485_initialized || !data || !len) return 0;
 
     /* 进入发送模式 */
     HAL_GPIO_WritePin(RS485_DE_RE_PORT, RS485_DE_RE_PIN, GPIO_PIN_SET);
@@ -165,7 +165,7 @@ uint16_t BSP_RS485_SendString(const char *str)
  */
 int BSP_RS485_Flush(uint32_t timeout)
 {
-    if (!rs485_initialized) return -1;
+    if (!s_rs485_initialized) return -1;
     return BSP_USART_Flush(RS485_USART_ID, timeout);
 }
 
@@ -207,7 +207,7 @@ uint8_t BSP_RS485_TxIdle(void)
  */
 uint16_t BSP_RS485_Available(void)
 {
-    if (!rs485_initialized) return 0;
+    if (!s_rs485_initialized) return 0;
     return BSP_USART_Available(RS485_USART_ID);
 }
 
@@ -216,7 +216,7 @@ uint16_t BSP_RS485_Available(void)
  */
 int BSP_RS485_Read(uint8_t *ch)
 {
-    if (!rs485_initialized) return -1;
+    if (!s_rs485_initialized) return -1;
     return BSP_USART_Read(RS485_USART_ID, ch);
 }
 
@@ -225,7 +225,7 @@ int BSP_RS485_Read(uint8_t *ch)
  */
 uint16_t BSP_RS485_ReadBytes(uint8_t *buf, uint16_t len)
 {
-    if (!rs485_initialized) return 0;
+    if (!s_rs485_initialized) return 0;
     return BSP_USART_ReadBytes(RS485_USART_ID, buf, len);
 }
 
@@ -234,6 +234,6 @@ uint16_t BSP_RS485_ReadBytes(uint8_t *buf, uint16_t len)
  */
 void BSP_RS485_FlushRx(void)
 {
-    if (!rs485_initialized) return;
+    if (!s_rs485_initialized) return;
     BSP_USART_FlushRx(RS485_USART_ID);
 }

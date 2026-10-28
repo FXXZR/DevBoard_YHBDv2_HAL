@@ -21,7 +21,7 @@
 
 /* 每条总线一把锁。用互斥量 (而非二值信号量) 以获优先级继承,
  * 理由见 spi_bus.h 的 SpiBus_Unlock 说明。 */
-static SemaphoreHandle_t s_spi_mutex[BSP_SPI_BUS_COUNT];
+static SemaphoreHandle_t s_bus_mutex[BSP_SPI_BUS_COUNT];
 
 /* ================================================================
  * 公开 API
@@ -30,13 +30,13 @@ static SemaphoreHandle_t s_spi_mutex[BSP_SPI_BUS_COUNT];
 void SpiBus_Init(void)
 {
     for (int i = 0; i < (int)BSP_SPI_BUS_COUNT; i++) {
-        if (s_spi_mutex[i] != NULL) continue;   /* 幂等 */
+        if (s_bus_mutex[i] != NULL) continue;   /* 幂等 */
 
-        s_spi_mutex[i] = xSemaphoreCreateMutex();
+        s_bus_mutex[i] = xSemaphoreCreateMutex();
 
         /* 创建失败只可能是 FreeRTOS 堆不够。这里必须当场炸 ——
          * 否则后续每次 SpiBus_Lock 都会在断言上失败, 现象离原因很远。 */
-        BSP_ASSERT(s_spi_mutex[i] != NULL);
+        BSP_ASSERT(s_bus_mutex[i] != NULL);
     }
 }
 
@@ -60,13 +60,13 @@ int SpiBus_Lock(BSP_SPI_Bus_Id_t bus, uint32_t timeout_ms)
      * 断言。 */
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return 0;
 
-    BSP_ASSERT(s_spi_mutex[bus] != NULL);       /* 忘了调 SpiBus_Init */
+    BSP_ASSERT(s_bus_mutex[bus] != NULL);       /* 忘了调 SpiBus_Init */
 
     ticks = (timeout_ms == SPI_BUS_WAIT_FOREVER)
             ? portMAX_DELAY
             : pdMS_TO_TICKS(timeout_ms);
 
-    return (xSemaphoreTake(s_spi_mutex[bus], ticks) == pdTRUE) ? 0 : -1;
+    return (xSemaphoreTake(s_bus_mutex[bus], ticks) == pdTRUE) ? 0 : -1;
 }
 
 void SpiBus_Unlock(BSP_SPI_Bus_Id_t bus)
@@ -76,11 +76,11 @@ void SpiBus_Unlock(BSP_SPI_Bus_Id_t bus)
     /* 与 SpiBus_Lock 的提前放行配对 —— 没拿过就不释放 */
     if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) return;
 
-    BSP_ASSERT(s_spi_mutex[bus] != NULL);
+    BSP_ASSERT(s_bus_mutex[bus] != NULL);
 
     /* 互斥量只能由持有者释放。give 失败 = 解锁位置写错了 —— 比如某个
      * 提前 return 的分支把锁漏放、或 A 任务释放了 B 任务持有的锁。
      * 这类错误靠人眼很难发现, 而且现象是"另一个任务莫名卡住",
      * 离原因非常远。断言能当场抓住。 */
-    BSP_ASSERT(xSemaphoreGive(s_spi_mutex[bus]) == pdTRUE);
+    BSP_ASSERT(xSemaphoreGive(s_bus_mutex[bus]) == pdTRUE);
 }

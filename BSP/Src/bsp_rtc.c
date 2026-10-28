@@ -54,8 +54,8 @@ static const uint32_t sec_per_day  = 86400U;
 /* ================================================================
  * 运行时上下文
  * ================================================================ */
-static RTC_HandleTypeDef rtc_handle;
-static uint8_t          rtc_ready = 0;
+static RTC_HandleTypeDef s_rtc_handle;
+static uint8_t          s_rtc_ready = 0;
 
 /* ================================================================
  * 内部: 时间戳 ↔ 日期时间互转
@@ -144,17 +144,17 @@ uint32_t BSP_RTC_dt_to_ts(const BSP_RTC_DateTime_t *dt)
 
 static void rtc_backup_date(const BSP_RTC_DateTime_t *dt)
 {
-    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_YEAR,  dt->year);
-    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_MONTH, dt->month);
-    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_DATE,  dt->date);
+    HAL_RTCEx_BKUPWrite(&s_rtc_handle, RTC_BKP_YEAR,  dt->year);
+    HAL_RTCEx_BKUPWrite(&s_rtc_handle, RTC_BKP_MONTH, dt->month);
+    HAL_RTCEx_BKUPWrite(&s_rtc_handle, RTC_BKP_DATE,  dt->date);
 }
 
 static void rtc_restore_date_to_hal(void)
 {
-    rtc_handle.DateToUpdate.Year  = (uint8_t)HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_YEAR);
-    rtc_handle.DateToUpdate.Month = (uint8_t)HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MONTH);
-    rtc_handle.DateToUpdate.Date  = (uint8_t)HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_DATE);
-    rtc_handle.DateToUpdate.WeekDay = 1; /* 不使用周几 */
+    s_rtc_handle.DateToUpdate.Year  = (uint8_t)HAL_RTCEx_BKUPRead(&s_rtc_handle, RTC_BKP_YEAR);
+    s_rtc_handle.DateToUpdate.Month = (uint8_t)HAL_RTCEx_BKUPRead(&s_rtc_handle, RTC_BKP_MONTH);
+    s_rtc_handle.DateToUpdate.Date  = (uint8_t)HAL_RTCEx_BKUPRead(&s_rtc_handle, RTC_BKP_DATE);
+    s_rtc_handle.DateToUpdate.WeekDay = 1; /* 不使用周几 */
 }
 
 /* ================================================================
@@ -215,21 +215,21 @@ static void rtc_cold_init(void)
 
     /* ---- 2. 使能并初始化 RTC ---- */
     __HAL_RCC_RTC_ENABLE();
-    rtc_handle.Instance          = RTC;
-    rtc_handle.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
-    rtc_handle.Init.OutPut       = RTC_OUTPUTSOURCE_NONE;
-    HAL_RTC_Init(&rtc_handle);
+    s_rtc_handle.Instance          = RTC;
+    s_rtc_handle.Init.AsynchPrediv = RTC_AUTO_1_SECOND;
+    s_rtc_handle.Init.OutPut       = RTC_OUTPUTSOURCE_NONE;
+    HAL_RTC_Init(&s_rtc_handle);
 
     /* ---- 3. 写入默认时间 (通过 HAL Time+Date) ---- */
     RTC_TimeTypeDef t = { .Hours = rtc_default.hour,
                           .Minutes = rtc_default.min,
                           .Seconds = rtc_default.sec };
-    HAL_RTC_SetTime(&rtc_handle, &t, RTC_FORMAT_BIN);
+    HAL_RTC_SetTime(&s_rtc_handle, &t, RTC_FORMAT_BIN);
 
     /* HAL RTC_DateTypeDef: {WeekDay, Month, Date, Year} */
     RTC_DateTypeDef d = { .WeekDay = 0, .Month = rtc_default.month,
                           .Date = rtc_default.date, .Year = rtc_default.year };
-    HAL_RTC_SetDate(&rtc_handle, &d, RTC_FORMAT_BIN);
+    HAL_RTC_SetDate(&s_rtc_handle, &d, RTC_FORMAT_BIN);
 
     /* ---- 4. Backup 寄存器保存日期 ---- */
     BSP_RTC_DateTime_t def = rtc_default;
@@ -237,7 +237,7 @@ static void rtc_cold_init(void)
     rtc_backup_date(&def);
 
     /* ---- 5. 标记已配置 ---- */
-    HAL_RTCEx_BKUPWrite(&rtc_handle, RTC_BKP_MAGIC, rtc_magic_value);
+    HAL_RTCEx_BKUPWrite(&s_rtc_handle, RTC_BKP_MAGIC, rtc_magic_value);
 }
 
 /* ================================================================
@@ -246,13 +246,13 @@ static void rtc_cold_init(void)
 
 void BSP_RTC_Init(void)
 {
-    if (rtc_ready) return;
+    if (s_rtc_ready) return;
 
     __HAL_RCC_PWR_CLK_ENABLE();
     __HAL_RCC_BKP_CLK_ENABLE();
     HAL_PWR_EnableBkUpAccess();
 
-    uint32_t magic = HAL_RTCEx_BKUPRead(&rtc_handle, RTC_BKP_MAGIC);
+    uint32_t magic = HAL_RTCEx_BKUPRead(&s_rtc_handle, RTC_BKP_MAGIC);
     if (magic != rtc_magic_value) {
         /* 冷启动: VBAT 掉电过, 完整配置 时钟源 + RTC + 默认值 + BKP */
         rtc_cold_init();
@@ -266,13 +266,13 @@ void BSP_RTC_Init(void)
          *     且 HAL_RCC_OscConfig(LSE) 对已使能的 LSE 是幂等的
          */
         rtc_config_clocksource();
-        rtc_handle.Instance = RTC;
+        s_rtc_handle.Instance = RTC;
         __HAL_RCC_RTC_ENABLE();
-        HAL_RTC_WaitForSynchro(&rtc_handle);
+        HAL_RTC_WaitForSynchro(&s_rtc_handle);
         rtc_restore_date_to_hal();
     }
 
-    rtc_ready = 1;
+    s_rtc_ready = 1;
 }
 
 /* ----------------------------------------------------------------
@@ -281,12 +281,12 @@ void BSP_RTC_Init(void)
 
 void BSP_RTC_GetDateTime(BSP_RTC_DateTime_t *dt)
 {
-    if (!rtc_ready || !dt) return;
+    if (!s_rtc_ready || !dt) return;
 
     RTC_TimeTypeDef t = {0};
     RTC_DateTypeDef d = {0};
-    HAL_RTC_GetTime(&rtc_handle, &t, RTC_FORMAT_BIN);
-    HAL_RTC_GetDate(&rtc_handle, &d, RTC_FORMAT_BIN);
+    HAL_RTC_GetTime(&s_rtc_handle, &t, RTC_FORMAT_BIN);
+    HAL_RTC_GetDate(&s_rtc_handle, &d, RTC_FORMAT_BIN);
 
     dt->sec     = t.Seconds;
     dt->min     = t.Minutes;
@@ -300,16 +300,16 @@ void BSP_RTC_GetDateTime(BSP_RTC_DateTime_t *dt)
 
 void BSP_RTC_SetDateTime(const BSP_RTC_DateTime_t *dt)
 {
-    if (!rtc_ready || !dt) return;
+    if (!s_rtc_ready || !dt) return;
 
     /* HAL 层写入 Time + Date */
     RTC_TimeTypeDef t = { dt->hour, dt->min, dt->sec };
-    HAL_RTC_SetTime(&rtc_handle, &t, RTC_FORMAT_BIN);
+    HAL_RTC_SetTime(&s_rtc_handle, &t, RTC_FORMAT_BIN);
 
     /* HAL RTC_DateTypeDef: {WeekDay, Month, Date, Year} */
     RTC_DateTypeDef d = { .WeekDay = 0, .Month = dt->month,
                           .Date = dt->date, .Year = dt->year };
-    HAL_RTC_SetDate(&rtc_handle, &d, RTC_FORMAT_BIN);
+    HAL_RTC_SetDate(&s_rtc_handle, &d, RTC_FORMAT_BIN);
 
     /* 同步写入 Backup 寄存器，复位后不丢 */
     rtc_backup_date(dt);

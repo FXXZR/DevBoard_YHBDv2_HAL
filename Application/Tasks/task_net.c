@@ -102,12 +102,13 @@ enum {
  * 状态
  * ================================================================ */
 
-/* 上一次的 PHYCFGR —— 只在值变化时打日志 */
-static uint8_t s_phy_last;
-static int     s_phy_first = 1;
-
-/* 任务自己的句柄 —— ISR 要拿它置事件位。在任务入口登记, 之后只读。 */
-static TaskHandle_t s_task;
+static struct {
+    TaskHandle_t task_handle;        /* ISR 拿它置事件位; 任务入口登记后只读 */
+    uint8_t      phy_last;    /* 上一次的 PHYCFGR —— 只在值变化时打日志 */
+    uint8_t      phy_first;   /* 首次读数尚未打印 */
+} s_net = {
+    .phy_first = 1,
+};
 
 /* ================================================================
  * ISR → 任务
@@ -126,7 +127,7 @@ static void net_int_isr(void)
 {
     BaseType_t woken = pdFALSE;
 
-    xTaskNotifyFromISR(s_task, TASK_NET_EVT_SOCKET, eSetBits, &woken);
+    xTaskNotifyFromISR(s_net.task_handle, TASK_NET_EVT_SOCKET, eSetBits, &woken);
     portYIELD_FROM_ISR(woken);
 }
 
@@ -223,13 +224,13 @@ static void net_tick(void)
 {
     uint8_t phy = W5500_Drv_ReadPhyCfg();
 
-    if (s_phy_first) {
+    if (s_net.phy_first) {
         LOG_I("PHYCFGR 初始 = 0x%02X", phy);
-        s_phy_last  = phy;
-        s_phy_first = 0;
-    } else if (phy != s_phy_last) {
-        LOG_I("PHYCFGR 变化: 0x%02X -> 0x%02X", s_phy_last, phy);
-        s_phy_last = phy;
+        s_net.phy_last  = phy;
+        s_net.phy_first = 0;
+    } else if (phy != s_net.phy_last) {
+        LOG_I("PHYCFGR 变化: 0x%02X -> 0x%02X", s_net.phy_last, phy);
+        s_net.phy_last = phy;
     }
 }
 
@@ -243,9 +244,9 @@ void vNetTask(void *pvParameters)
 
     TickType_t last_tick;
 
-    /* 登记句柄 + 开中断。顺序不能反: ISR 一开就可能进来拿 s_task 置位,
+    /* 登记句柄 + 开中断。顺序不能反: ISR 一开就可能进来拿 s_net.task 置位,
      * 那时句柄必须已经有效。 */
-    s_task = xTaskGetCurrentTaskHandle();
+    s_net.task_handle = xTaskGetCurrentTaskHandle();
 
     /* ================================================================
      * W5500 的全生命周期归本任务 —— 上电、配网、socket 收发都在这里。

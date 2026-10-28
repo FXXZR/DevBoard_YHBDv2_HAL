@@ -64,7 +64,7 @@ typedef struct {
     uint8_t  initialized;
 } SoftI2C_Ctx_t;
 
-static SoftI2C_Ctx_t soft_i2c_ctx[BSP_SOFT_I2C_BUS_COUNT];
+static SoftI2C_Ctx_t s_si2c_ctx[BSP_SOFT_I2C_BUS_COUNT];
 
 /* ================================================================
  * 内部: GPIO 基础操作
@@ -240,7 +240,7 @@ void BSP_SoftI2C_Init(BSP_SoftI2C_Bus_Id_t id, BSP_SoftI2C_Speed_t speed)
 {
     if (id >= BSP_SOFT_I2C_BUS_COUNT) return;
 
-    SoftI2C_Ctx_t *ctx = &soft_i2c_ctx[id];
+    SoftI2C_Ctx_t *ctx = &s_si2c_ctx[id];
     if (ctx->initialized) return;
     ctx->initialized = 1;
     ctx->hw = &soft_i2c_hw_map[id];
@@ -284,10 +284,10 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_MemWrite(BSP_SoftI2C_Bus_Id_t id,
                                           uint32_t timeout)
 {
     (void)timeout;
-    if (id >= BSP_SOFT_I2C_BUS_COUNT || !soft_i2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
+    if (id >= BSP_SOFT_I2C_BUS_COUNT || !s_si2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
     if (len > 0 && !data) return BSP_SOFT_I2C_ERROR;
 
-    const SoftI2C_Ctx_t *ctx = &soft_i2c_ctx[id];
+    const SoftI2C_Ctx_t *ctx = &s_si2c_ctx[id];
     uint8_t ack;
 
     /* START + dev(W) */
@@ -321,10 +321,10 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_MemRead(BSP_SoftI2C_Bus_Id_t id,
                                          uint32_t timeout)
 {
     (void)timeout;
-    if (id >= BSP_SOFT_I2C_BUS_COUNT || !soft_i2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
+    if (id >= BSP_SOFT_I2C_BUS_COUNT || !s_si2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
     if (len > 0 && !data) return BSP_SOFT_I2C_ERROR;
 
-    const SoftI2C_Ctx_t *ctx = &soft_i2c_ctx[id];
+    const SoftI2C_Ctx_t *ctx = &s_si2c_ctx[id];
     uint8_t ack;
 
     /* Phase 1: START + dev(W) + MemAddr */
@@ -358,9 +358,9 @@ BSP_SoftI2C_Status_t BSP_SoftI2C_IsDeviceReady(BSP_SoftI2C_Bus_Id_t id,
                                                uint32_t trials, uint32_t timeout)
 {
     (void)timeout;
-    if (id >= BSP_SOFT_I2C_BUS_COUNT || !soft_i2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
+    if (id >= BSP_SOFT_I2C_BUS_COUNT || !s_si2c_ctx[id].initialized) return BSP_SOFT_I2C_ERROR;
 
-    const SoftI2C_Ctx_t *ctx = &soft_i2c_ctx[id];
+    const SoftI2C_Ctx_t *ctx = &s_si2c_ctx[id];
 
     for (uint32_t t = 0; t < trials; t++) {
         soft_i2c_start(ctx);

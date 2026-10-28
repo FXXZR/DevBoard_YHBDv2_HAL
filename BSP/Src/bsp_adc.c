@@ -49,7 +49,7 @@ typedef struct {
     uint8_t             initialized;
 } ADC_Ctx_t;
 
-static ADC_Ctx_t adc_ctx[BSP_ADC_COUNT];
+static ADC_Ctx_t s_adc_ctx[BSP_ADC_COUNT];
 
 /* ================================================================
  * HAL 回调
@@ -73,7 +73,7 @@ void HAL_ADC_ConvCpltCallback(ADC_HandleTypeDef *hadc)
 static ADC_Ctx_t *adc_ctx_from_id(BSP_ADC_Id_t id)
 {
     if (id >= BSP_ADC_COUNT) return NULL;
-    return &adc_ctx[id];
+    return &s_adc_ctx[id];
 }
 
 /* ================================================================
@@ -84,7 +84,7 @@ void BSP_ADC_Init(BSP_ADC_Id_t id)
 {
     if (id >= BSP_ADC_COUNT) return;
     const ADC_HW_Map_t *hw  = &adc_hw_map[id];
-    ADC_Ctx_t          *ctx = &adc_ctx[id];
+    ADC_Ctx_t          *ctx = &s_adc_ctx[id];
 
     if (ctx->initialized) return;
     ctx->initialized = 1;
