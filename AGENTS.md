@@ -42,9 +42,10 @@ Claude Code 只从 `.claude/skills/` 加载技能；首次 clone 后运行
   宏多了抽 `xxx_config.h` (只被 `.c` 包含)
 - 命名: 变量/常量 `snake_case`, 类型 `CamelCase`+`_t`, 宏与枚举常量 `UPPER_SNAKE`;
   **不用 `k` 前缀 + 驼峰**
-- `s_` 只表示**文件作用域可变状态** (`s_ctx`/`s_net`); `static` 辅助函数与只读常量都不加该前缀
+- `s_` 只表示**文件作用域可变状态**; 必须写成 `s_<模块>` (`s_usart_ctx`/`s_log`), 别把模块前缀删掉
 - `static` 辅助函数一律带**模块前缀** (`eeprom_page_write()`/`ap3216c_write_reg()`), 不留光杆函数名
-- `.c` 内的可变状态集中到一个文件作用域结构体 (`s_ctx`), 不散落一长串 `s_xxx`
+- `.c` 内的可变状态到**第 3 个同源变量**就收进文件作用域结构体 (`s_ctx`), 不散落一长串 `s_xxx`;
+  1~2 个可以各自 `static`
 - 日志用 `LOG_E/W/I/D`; `printf` 只用于临时排查
 - ⚠️ Release 必须写 `LOG_LEVEL_WARN`（宏）, **不是** `LOG_LVL_WARN`（enum）—— 后者会静默关掉全部日志
 - ⚠️ 日志 TX 环只有 512 B, 成组打印会静默丢行; 行间留 `vTaskDelay(20)` 或减少行数

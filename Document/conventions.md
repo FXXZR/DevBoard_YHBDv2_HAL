@@ -414,31 +414,34 @@ enum {
 
 ### 状态结构体
 
-- 状态集中在一个文件作用域结构体实例。实例名用 `s_ctx`；需要强调归属时用 `s_<模块>`（如 `s_log`、
-  `s_net`），两者不要在同一模块里混用
+- 状态实例名一律 **`s_<模块>`**：`s_usart_ctx`、`s_adc_ctx`、`s_lcd_ctx`、`s_log`、`s_net`。
+  **加 `s_` 前缀时不要顺手把模块前缀删掉** —— `s_ctx` 这种名字出了本文件就没有归属信息，
+  读别的文件要回头翻定义才知道是谁的状态；`s_` 只表达"可变、跨调用"，不表达"属于哪个模块"
 - **`s_` 前缀专用于状态对象**。`static` 辅助函数用 `<模块>_` 前缀（`w5500_phy_config()`、
   `sock_wait_closed()`），只读常量不加前缀（`task_net_tick_ms`）—— 于是看到 `s_xxx`
   就能断定它是可写的跨调用状态
-- **门槛：一个状态变量可以单独 `static`；出现第二个、且它们描述同一件事（同一个任务、同一个外设
-  实例的状态机、同一份运行期账本）时，立刻收进结构体**。不要等长到十个才动手
+- **门槛：1~2 个状态变量可以各自独立 `static`；出现第 3 个、且它们描述同一件事（同一个任务、
+  同一个外设实例的状态机、同一份运行期账本）时，收进结构体**。不要等长到十个才动手 ——
+  但两个就合并属于过度操作，反而让单变量模块多一层 `.field` 噪音
 - 结构体只装跨调用状态。函数内的临时变量、只在一次调用内有效的中间值不进
-- 只在本文件使用时用匿名 `struct { ... } s_ctx;`；要作为参数传递、或要在数组/多个实例间复用类型时，
-  才写 `typedef struct { ... } XxxCtx_t;`。默认值一律用 designated initializer，匿名的也能写
-- 默认值用 designated initializer（与文末「HAL 结构体初始化规范」同一条理由）
-- 多实例外设用下标数组：`static XxxCtx_t s_ctx[BSP_XXX_COUNT];`，与 API 的枚举 ID 一一对应
+- 只在本文件使用时用匿名 `struct { ... } s_<模块>;`；要作为参数传递、或要在数组/多个实例间复用类型时，
+  才写 `typedef struct { ... } XxxCtx_t;`
+- 默认值一律用 designated initializer（与文末「HAL 结构体初始化规范」同一条理由），匿名的也能写
+- 多实例外设用下标数组：`static Xxx_Ctx_t s_<模块>_ctx[BSP_XXX_COUNT];`（如 `s_usart_ctx[]`），
+  与 API 的枚举 ID 一一对应
 - 结构体类型不导出到头文件。要观测内部状态就提供只读快照 API，不要 `extern` 一个全局实例
 - 运行期禁止对状态结构体整体 `memset` —— 会把锁、句柄、计数器一起清掉；只在初始化阶段清零一次
 
-以 [task_net.c](../Application/Tasks/task_net.c) 为例：
+以 [task_net.c](../Application/Tasks/task_net.c) 为例（类型不导出，所以用匿名 struct）：
 
 ```c
-typedef struct {
+static struct {
     TaskHandle_t task;        /* ISR 靠它置事件位; 任务入口登记后只读 */
     uint8_t      phy_last;    /* 上次读到的 PHYCFGR */
     uint8_t      phy_first;   /* 首次读数尚未打印 */
-} NetCtx_t;
-
-static NetCtx_t s_net;
+} s_net = {
+    .phy_first = 1,
+};
 ```
 
 调用处从 `s_phy_last` 变成 `s_net.phy_last`；新增 “上次链路状态时间戳” 之类字段时不再扩大文件级命名空间。
@@ -456,7 +459,8 @@ static NetCtx_t s_net;
 ### 迁移口径
 
 现有模块里的散落 `s_xxx`（如 [log.c](../Services/log/log.c) 的 7 个文件作用域变量）**不要求一次性重构**。
-口径是：新写模块一律按本节执行；改动到某个模块、需要新增第二个状态变量时，顺手把该模块的状态收进结构体。
+口径是：新写模块一律按本节执行；改动到某个模块、且需要新增到第 3 个同源状态变量时，顺手把该模块的
+状态收进结构体。
 
 ## API 设计规范 (API Design Rules)
 
@@ -466,7 +470,7 @@ static NetCtx_t s_net;
 |------|------|
 | **枚举 ID 代替指针句柄** | `typedef enum { BSP_SPI_BUS_1, BSP_SPI_BUS_COUNT } BSP_SPI_Bus_Id_t;` |
 | **`static const` 硬件映射表** | `.c` 文件内部 `static const HW_Map_t hw_map[] = { [BUS_1] = {...} };` |
-| **`static` 上下文数组** | `.c` 文件内部 `static Xxx_Ctx_t s_ctx[BSP_BUS_COUNT];`，外部不可见 |
+| **`static` 上下文数组** | `.c` 文件内部 `static Xxx_Ctx_t s_<模块>_ctx[BSP_BUS_COUNT];`，外部不可见 |
 | **API 传枚举 ID** | `void BSP_SPI_Init(BSP_SPI_Bus_Id_t id);` 而非 `void BSP_SPI_Init(BSP_SPI_Bus_t *bus);` |
 | **禁止 `extern` 全局句柄** | 不暴露 `extern BSP_SPI_Bus_t g_spi_bus_1;` |
 
